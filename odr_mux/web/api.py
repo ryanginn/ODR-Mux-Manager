@@ -592,6 +592,19 @@ def put_data_service(sid):
     return jsonify(ok=True)
 
 
+@bp.get('/api/data-services/<sid>/inspect')
+@require('viewer')
+def inspect_dat(sid):
+    _need_project()
+    from ..datfile import inspect
+    st = ws().draft().station(sid)
+    if not st or st['kind'] != 'data':
+        raise ApiError('Data service not found.', 404)
+    path = (st['subchannel'] or {}).get('inputuri') or ''
+    addr = (st['component'] or {}).get('address')
+    return jsonify(inspect(path, addr))
+
+
 @bp.get('/api/data-services/<sid>/attached')
 @require('viewer')
 def get_attached(sid):
