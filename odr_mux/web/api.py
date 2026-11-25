@@ -566,8 +566,14 @@ def put_section(name):
 @require('editor')
 def add_data_service():
     data = json_body()
-    from ..dataservices import add_data_service as add
-    res = _edit(lambda p: add(p, data), f'add data service {data.get("label")}')
+    from ..dataservices import add_data_service as add, set_attached
+
+    def fn(p):
+        r = add(p, data)
+        if data.get('attached'):
+            set_attached(p, r['station'], data['attached'])
+        return r
+    res = _edit(fn, f'add data service {data.get("label")}')
     return jsonify(ok=True, station=res['station'])
 
 
@@ -575,9 +581,26 @@ def add_data_service():
 @require('editor')
 def put_data_service(sid):
     data = json_body()
-    from ..dataservices import update_data_service as upd
-    _edit(lambda p: upd(p, sid, data), f'edit data service {sid}')
+    from ..dataservices import update_data_service as upd, set_attached
+
+    def fn(p):
+        upd(p, sid, data)
+        if 'attached' in data:
+            set_attached(p, sid, data.get('attached') or [])
+        return []
+    _edit(fn, f'edit data service {sid}')
     return jsonify(ok=True)
+
+
+@bp.get('/api/data-services/<sid>/attached')
+@require('viewer')
+def get_attached(sid):
+    _need_project()
+    from ..dataservices import attached_services
+    try:
+        return jsonify(attached=attached_services(ws().draft(), sid))
+    except ops.OpError as e:
+        raise ApiError(str(e), 404)
 
 
 @bp.delete('/api/stations/<sid>')

@@ -1349,12 +1349,27 @@ async function pageData(root) {
         h("div", { class: "sc-inset" }, h("div", { class: "desc mono ellipsis" }, s.inputuri || "no file")),
         h("div", { class: "sc-foot" }, h("span", { class: "chip" }, `SId ${s.id}`), h("span", { class: "chip" }, `address ${c.address || "?"}`),
           ua ? h("span", { class: "chip accent" }, [].concat(ua).join(", ")) : c.figtype ? h("span", { class: "chip accent" }, `figtype ${c.figtype}`) : null,
-          String(c.datagroup) === "true" ? h("span", { class: "chip" }, "data groups") : null));
+          String(c.datagroup) === "true" ? h("span", { class: "chip" }, "data groups") : null,
+          (s.secondary_components || []).length ? h("span", { class: "chip blue" }, `under ${(s.secondary_components || []).length} station${(s.secondary_components || []).length === 1 ? "" : "s"}`) : null));
     })) : h("div", { class: "empty" }, h("h3", null, "No data services"), h("p", null, "Add SPI, Journaline or TPEG and point it at the generator's .dat file.")));
 }
 
-function dataEditor(s) {
+async function dataEditor(s) {
   const ro = !isEditor();
+  let all = [], attached = [];
+  try {
+    all = (await api("GET", "/api/stations")).stations.filter((x) => x.kind === "audio" && x.service_uid);
+    if (s) attached = (await api("GET", `/api/data-services/${encodeURIComponent(s.id)}/attached`)).attached;
+  } catch (e) { /* toasted */ }
+  const attachBoxes = all.map((x) => [x.service_uid, toggle(x.label || x.service_uid, attached.includes(x.service_uid), { disabled: ro })]);
+  const attachField = h("div", { class: "field" },
+    h("div", { class: "label-row" }, h("label", null, "Also show under these stations"), h("span", { class: "spacer" }),
+      ro ? null : h("span", { class: "row tight" },
+        btn("All", { cls: "sm ghost", onclick: () => attachBoxes.forEach(([, t]) => { t.box.checked = true; }) }),
+        btn("None", { cls: "sm ghost", onclick: () => attachBoxes.forEach(([, t]) => { t.box.checked = false; }) }))),
+    h("div", { class: "list-check" }, attachBoxes.length ? attachBoxes.map(([, t]) => t.el) : h("span", { class: "muted small" }, "No audio stations.")),
+    h("div", { class: "hint" }, "Each ticked station gets this service as an extra component on the same packet address, so receivers playing that station offer it (e.g. Journaline news while the station plays)."));
+  const attachedValue = () => attachBoxes.filter(([, t]) => t.box.checked).map(([uid]) => uid);
   const c = (s && s.component) || {};
   const sc = (s && s.subchannel) || {};
   const svc = (s && s.service) || {};
@@ -1383,7 +1398,7 @@ function dataEditor(s) {
     field(".dat file written by the generator", h("div", { class: "row" }, file, isAdmin() && !ro ? pick : null)),
     h("div", { class: "grid-2" }, field("Bitrate (kbps)", bitrate), field("Subchannel type", subtype)), prot.el,
     h("div", { class: "grid-3" }, field("Packet address", addr, { hint: "Must match the generator." }), field("DSCTy (component type)", dscty, { hint: "60 = MOT, 5 = TDC. Blank = preset." }), h("div", { class: "field" }, h("label", null, " "), dg.el)),
-    field("User applications (FIG 0/13)", uap.el), field("figtype (only for apps without a name, e.g. TPEG 0x4)", fig));
+    field("User applications (FIG 0/13)", uap.el), field("figtype (only for apps without a name, e.g. TPEG 0x4)", fig), attachField);
   const foot = [btn("Close", { onclick: () => m.close() })];
   if (!ro && s) foot.unshift(btn("Remove", { cls: "danger ghost", icon: "trash", onclick: async () => {
     if (!(await confirmDialog(`Remove ${s.label}? Its subchannel frees ${s.cu} CU.`, { danger: true, okText: "Remove" }))) return;
@@ -1393,10 +1408,12 @@ function dataEditor(s) {
     try {
       if (s) await api("PUT", `/api/data-services/${encodeURIComponent(s.id)}`, { service: { label: label.value, shortlabel: short.value, id: sid.value },
         subchannel: { inputuri: file.value, bitrate: bitrate.value, type: subtype.value, "protection-profile": prot.prof.value, protection: prot.lvl.value },
-        component: { address: addr.value, datagroup: dg.box.checked ? "true" : "false", type: dscty.value, user_apps: uap.value(), figtype: uap.value().length ? "" : fig.value } });
+        component: { address: addr.value, datagroup: dg.box.checked ? "true" : "false", type: dscty.value, user_apps: uap.value(), figtype: uap.value().length ? "" : fig.value },
+        attached: attachedValue() });
       else await api("POST", "/api/data-services", { preset: preset.value, label: label.value, shortlabel: short.value, sid: sid.value, inputuri: file.value, bitrate: parseInt(bitrate.value),
         subtype: subtype.value, profile: prot.prof.value, protection: parseInt(prot.lvl.value), address: addr.value, datagroup: dg.box.checked, type: dscty.value === "" ? undefined : parseInt(dscty.value),
-        userapps: preset.value === "custom" || uap.value().length ? uap.value() : undefined, figtype: fig.value || undefined });
+        userapps: preset.value === "custom" || uap.value().length ? uap.value() : undefined, figtype: fig.value || undefined,
+        attached: attachedValue() });
       toast("Saved to the draft.", "ok"); m.close(); pokeStatus(); route();
     } catch (e) { /* toasted */ }
   } }));
