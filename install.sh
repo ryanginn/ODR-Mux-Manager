@@ -59,6 +59,10 @@ if ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$PORT\$"; then
 fi
 echo "  The service user must be able to edit your mux folder (conf.mux, supervisor/, mot/)."
 RUN_USER=$(ask "Run as user" "${RUN_USER:-odr}")
+echo "  After Apply the manager can either reload only the changed encoders (supervisorctl reread/update)"
+echo "  or restart the whole supervisor service (sudo systemctl restart supervisor; every station restarts)."
+RELOAD=$(ask "Restart the whole supervisor service on Apply? (y/n)" "y")
+case "$RELOAD" in y|Y|yes) RELOAD=restart ;; *) RELOAD=update ;; esac
 if [ -z "$WITH_FFMPEG" ]; then
     if [ -x "$PREFIX/ffmpeg/bin/ffmpeg" ]; then WITH_FFMPEG=keep
     else
@@ -104,9 +108,9 @@ WRAP
 chmod 755 /usr/local/bin/$APP
 
 # config: keep an existing one, only update the address
-python3 - "$CONF" "$BIND" "$PORT" "$DATA" "$FFMPEG_BIN" <<'PY'
+python3 - "$CONF" "$BIND" "$PORT" "$DATA" "$FFMPEG_BIN" "$RELOAD" <<'PY'
 import json, sys, os
-path, bind, port, data, ffmpeg = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5]
+path, bind, port, data, ffmpeg, reload_mode = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5], sys.argv[6]
 cfg = {}
 if os.path.exists(path):
     cfg = json.load(open(path))
@@ -115,6 +119,9 @@ cfg.setdefault('state_dir', data)
 cfg.setdefault('manager_exe', '/usr/local/bin/odr-mux-manager')
 if ffmpeg:
     cfg.setdefault('tool_paths', {})['ffmpeg'] = ffmpeg
+cfg['supervisor_reload'] = reload_mode
+cfg.setdefault('supervisor_sudo', 'auto')
+cfg.setdefault('supervisor_restart_cmd', 'sudo -n systemctl restart supervisor')
 json.dump(cfg, open(path, 'w'), indent=2)
 PY
 chown -R "$RUN_USER:$RUN_GROUP" "$CONF_DIR" "$DATA"
@@ -126,15 +133,23 @@ systemctl daemon-reload
 systemctl enable "$APP" >/dev/null 2>&1
 systemctl restart "$APP"
 
-# supervisor access
-SOCK=/var/run/supervisor.sock
-if [ -S "$SOCK" ] && ! runuser -u "$RUN_USER" -- test -w "$SOCK"; then
-    warn "$RUN_USER cannot use $SOCK, so the manager can't show encoder state or restart encoders."
-    echo "  Fix: in /etc/supervisor/supervisord.conf, [unix_http_server], set"
-    echo "       chmod=0770"
-    echo "       chown=root:$RUN_GROUP"
-    echo "  then: sudo systemctl restart supervisor"
+# supervisor access: the default socket is root-only, so allow exactly these commands without a password
+SUDOERS=/etc/sudoers.d/$APP
+CTL_BIN=$(command -v supervisorctl || echo /usr/bin/supervisorctl)
+SYSTEMCTL_BIN=$(command -v systemctl || echo /usr/bin/systemctl)
+TMP_SUDO=$(mktemp)
+cat > "$TMP_SUDO" <<SUDO
+# Written by the odr-mux-manager installer: lets the web UI read encoder state/logs, restart
+# encoders and reload or restart supervisor. Nothing else.
+$RUN_USER ALL=(root) NOPASSWD: $CTL_BIN *, $SYSTEMCTL_BIN restart supervisor, $SYSTEMCTL_BIN restart supervisor.service
+SUDO
+if visudo -cqf "$TMP_SUDO"; then
+    install -m 0440 -o root -g root "$TMP_SUDO" "$SUDOERS"
+    echo "  Added $SUDOERS (supervisorctl and 'systemctl restart supervisor' for $RUN_USER)."
+else
+    warn "could not validate the sudoers rule; the manager may not be able to control supervisor"
 fi
+rm -f "$TMP_SUDO"
 
 for _ in $(seq 1 20); do
     if curl -fs -o /dev/null "http://127.0.0.1:$PORT/api/state" 2>/dev/null; then break; fi

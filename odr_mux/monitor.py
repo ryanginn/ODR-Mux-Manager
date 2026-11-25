@@ -33,22 +33,76 @@ def to_db(v):
     return max(-90.0, 20 * math.log10(v / 32767.0))
 
 
-def read_dls(path: str, limit=2048) -> Optional[dict]:
-    """Return {'text', 'dlplus', 'mtime'} for an odr-padenc DLS file."""
+DL_PARAMS_OPEN = '##### parameters { #####'
+DL_PARAMS_CLOSE = '##### parameters } #####'
+# DL Plus content types (ETSI TS 102 980, Annex A) that are worth showing
+DLPLUS_TYPES = {1: 'title', 2: 'album', 3: 'track', 4: 'artist', 5: 'composition', 6: 'movement', 7: 'conductor',
+                8: 'composer', 9: 'band', 10: 'comment', 11: 'genre', 12: 'news', 13: 'news.local', 14: 'stock',
+                15: 'sport', 16: 'lottery', 17: 'horoscope', 18: 'daily', 19: 'health', 20: 'event', 21: 'scene',
+                22: 'cinema', 23: 'tv', 24: 'datetime', 25: 'weather', 26: 'traffic', 27: 'alarm',
+                28: 'advertisement', 29: 'url', 30: 'other', 31: 'now', 32: 'next', 33: 'part', 34: 'host',
+                35: 'editorial', 36: 'frequency', 37: 'homepage', 38: 'subchannel', 39: 'phone.hotline',
+                40: 'phone.studio', 41: 'phone', 42: 'sms.studio', 43: 'sms', 44: 'email.hotline',
+                45: 'email.studio', 46: 'email', 47: 'mms', 48: 'chat', 49: 'chat.centre', 50: 'vote.question',
+                51: 'vote.centre', 59: 'place', 60: 'appointment', 61: 'identifier', 62: 'purchase', 63: 'get_data'}
+
+
+def parse_dls_text(raw: str) -> dict:
+    """Split an odr-padenc DLS file into the label and its DL Plus parameters.
+
+    Format (odr-padenc dls.cpp):
+        ##### parameters { #####
+        DL_PLUS=1
+        DL_PLUS_ITEM_TOGGLE=0
+        DL_PLUS_ITEM_RUNNING=1
+        DL_PLUS_TAG=4 0 13        (content type, start, length-1)
+        ##### parameters } #####
+        Artist - Title
+    """
+    lines = raw.replace('\r\n', '\n').split('\n')
+    params = {}
+    tags = []
+    if lines and lines[0].strip() == DL_PARAMS_OPEN:
+        i = 1
+        while i < len(lines) and lines[i].strip() != DL_PARAMS_CLOSE:
+            key, _, val = lines[i].strip().partition('=')
+            if key == 'DL_PLUS_TAG':
+                parts = val.split()
+                if len(parts) == 3 and all(p.isdigit() for p in parts):
+                    tags.append(tuple(int(p) for p in parts))
+            elif key:
+                params[key] = val.strip()
+            i += 1
+        lines = lines[i + 1:]
+    text = '\n'.join(lines).strip()
+    out = {'text': text, 'dlplus': None}
+    if params.get('DL_PLUS') == '1' or tags:
+        # markers are positions in the label as encoded (UTF-8 here)
+        enc = text.encode('utf-8')
+        items = []
+        for ctype, start, ln in tags:
+            frag = enc[start:start + ln + 1].decode('utf-8', 'replace').strip()
+            items.append({'type': ctype, 'name': DLPLUS_TYPES.get(ctype, str(ctype)), 'text': frag})
+        out['dlplus'] = {'items': items,
+                         'running': params.get('DL_PLUS_ITEM_RUNNING', '1') == '1',
+                         'toggle': params.get('DL_PLUS_ITEM_TOGGLE')}
+        by = {it['name']: it['text'] for it in items}
+        out['artist'] = by.get('artist') or by.get('band')
+        out['title'] = by.get('title')
+    return out
+
+
+def read_dls(path: str, limit=4096) -> Optional[dict]:
+    """Return {'text', 'dlplus', 'artist', 'title', 'mtime'} for an odr-padenc DLS file."""
     try:
         st = os.stat(path)
         with open(path, 'rb') as f:
             raw = f.read(limit)
     except OSError:
         return None
-    text = raw.decode('utf-8', 'replace')
-    dlplus = None
-    if text.startswith('##### parameters {'):
-        head, sep, rest = text.partition('##### }')
-        if sep:
-            dlplus = head
-            text = rest.lstrip('\n')
-    return {'text': text.strip(), 'dlplus': bool(dlplus), 'mtime': st.st_mtime}
+    d = parse_dls_text(raw.decode('utf-8', 'replace'))
+    d['mtime'] = st.st_mtime
+    return d
 
 
 def list_slides(d: str, limit=200):
@@ -179,6 +233,8 @@ class Monitor:
         self._mgmt_ep = None
         self._stats = StatsListener()
         self._silence_since: Dict[str, float] = {}
+        self._xruns: Dict[str, tuple] = {}
+        self._procs = (0.0, None, None)
         self._project_cache = (0, None)
         self.onair = None
 
@@ -240,12 +296,15 @@ class Monitor:
             else:
                 snap['dabmux'] = {'ok': False, 'endpoint': ep}
         # supervisor
+        # encoder state every 5 s (via sudo supervisorctl that is a process spawn + an auth.log line each time)
         procs = None
-        try:
-            procs = self.ws.supervisor().processes()
-            snap['supervisor'] = {'ok': True}
-        except Exception as e:
-            snap['supervisor'] = {'ok': False, 'error': str(e)[:200]}
+        if time.time() - self._procs[0] >= 5:
+            try:
+                self._procs = (time.time(), self.ws.supervisor().processes(), None)
+            except Exception as e:
+                self._procs = (time.time(), None, str(e)[:300])
+        procs = self._procs[1]
+        snap['supervisor'] = {'ok': procs is not None, 'error': self._procs[2]} if self._procs[0] else None
         # stats sockets
         stations = p.stations()
         if self.cfg.get('levels_source') in ('stats', 'both'):
@@ -302,10 +361,23 @@ class Monitor:
                 else:
                     self._silence_since.pop(s['id'], None)
             st = (d['input_state'] or '')
+            # odr-dabmux keeps an input "Unstable" for 30 minutes after its 3rd glitch, so after any
+            # restart every station looks unstable for half an hour. Alert only when the under/overrun
+            # counters actually went up in the last minute.
+            b = d['buffer'] or {}
+            xr = (b.get('underruns') or 0) + (b.get('overruns') or 0)
+            prev = self._xruns.get(s['id'])
+            if prev is None or xr < prev[0]:
+                self._xruns[s['id']] = (xr, 0.0)
+            elif xr > prev[0]:
+                self._xruns[s['id']] = (xr, now)
+            last_glitch = self._xruns[s['id']][1]
+            d['glitching'] = bool(last_glitch and now - last_glitch < 60)
             if st.startswith('NoData'):
                 d['alerts'].append({'sev': 'error', 'code': 'nodata', 'msg': 'No data reaching odr-dabmux'})
-            elif st.startswith('Unstable'):
-                d['alerts'].append({'sev': 'warning', 'code': 'unstable', 'msg': 'Input unstable (buffer under/overruns)'})
+            elif d['glitching']:
+                d['alerts'].append({'sev': 'warning', 'code': 'unstable',
+                                    'msg': f'Buffer under/overruns in the last minute ({xr} since start)'})
             for k in ('audio', 'pad', 'dmb'):
                 if d[k] and d[k]['state'] not in ('RUNNING',):
                     d['alerts'].append({'sev': 'error' if k in ('audio', 'dmb') else 'warning', 'code': f'{k}-down',

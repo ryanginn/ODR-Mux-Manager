@@ -391,7 +391,8 @@ def merge_json(node: Node, data: dict, remove_missing=True):
                     n.children = []
                     n.value = None
                 merge_json(n, v, remove_missing)
-            elif v is None:
+            elif v is None or (isinstance(v, str) and v.strip() == ''):
+                # never write `key ""`: odr-dabmux's hexparse() aborts on empty values
                 node.remove(n)
             else:
                 sv = _to_str(v)

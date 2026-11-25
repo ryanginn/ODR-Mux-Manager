@@ -27,7 +27,11 @@ DEFAULTS = {
     'supervisorctl': 'supervisorctl',
     'supervisor_conf': None,          # passed as -c to supervisorctl when set
     'dabmux_restart': 'auto',         # auto | none | supervisor:<program> | systemd:<unit> | command:<cmd>
+    'supervisor_reload': 'update',    # update = reread/update (only changed programs restart) | restart = restart the service
+    'supervisor_restart_cmd': 'sudo -n systemctl restart supervisor',
+    'supervisor_sudo': 'auto',        # auto = use `sudo -n supervisorctl` when the socket refuses us | always | never
     'run_commands': True,             # False = write files only (dry environments, tests)
+    'validate_with_dabmux': True,     # test-run the new config through odr-dabmux before Apply writes it
     # monitoring
     'levels_source': 'dabmux',        # dabmux | stats | both
     'dabmux_mgmt': None,              # tcp://127.0.0.1:<managementport>, default from mux file

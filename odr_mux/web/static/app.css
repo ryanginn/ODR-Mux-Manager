@@ -543,3 +543,6 @@ tr.removed td:last-child { opacity: 1; text-decoration: none; }
 .code.diff .hunk { color: var(--blue-text); }
 details summary { cursor: pointer; padding: 6px 0; }
 .mt { margin-top: 18px; }
+
+.dlp { font-size: 9.5px; font-weight: 800; letter-spacing: .05em; padding: 1px 5px; border-radius: 4px; background: var(--accent-bg); color: var(--accent-2); vertical-align: 1px; }
+.dlp-items { margin-top: 8px; }

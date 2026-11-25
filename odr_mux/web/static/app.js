@@ -759,7 +759,12 @@ function monCard(s) {
     last = d;
     if (s.kind === "audio") put(clear(meters), levelMeter(d && d.levels));
     const t = d && (d.onair && d.onair.dls ? d.onair.dls : (d.dls && d.dls.text));
-    dls.textContent = t || (s.feed === "external" ? "External feed" : "—");
+    clear(dls);
+    const dp = d && d.dls && d.dls.dlplus;
+    if (dp && (d.dls.artist || d.dls.title)) {
+      dls.append(h("span", { class: "dlp", title: "DL Plus" }, "DL+"), " ",
+        d.dls.artist ? h("b", null, d.dls.artist) : null, d.dls.artist && d.dls.title ? " – " : null, d.dls.title || "");
+    } else dls.append(t || (s.feed === "external" ? "External feed" : "—"));
     dls.title = t || "";
     clear(slide);
     const sl = d && d.slides;
@@ -770,7 +775,7 @@ function monCard(s) {
     clear(chips);
     if (s.feed === "external") chips.appendChild(h("span", { class: "chip blue" }, icon("globe"), "external"));
     if (d) { for (const [k, l] of [["audio", "audio"], ["pad", "PAD"], ["dmb", "DMB encoder"]]) { const c = procDot(d[k], l); if (c) chips.appendChild(c); } }
-    if (d && d.input_state && !String(d.input_state).startsWith("Streaming")) chips.appendChild(h("span", { class: "chip amber" }, String(d.input_state).replace(/ \(\d\)/, "")));
+    if (d && d.input_state && String(d.input_state).startsWith("Silent")) chips.appendChild(h("span", { class: "chip amber" }, "Silent"));
     clear(alerts);
     for (const a of (d && d.alerts) || []) alerts.appendChild(h("span", { class: "chip " + (a.sev === "error" ? "red" : "amber") }, icon("alert"), a.msg));
     el.classList.toggle("problem", !!(d && d.alerts && d.alerts.some((a) => a.sev === "error")));
@@ -789,9 +794,13 @@ function monDetail(s, getSnap) {
       h("div", { class: "row wrap" }, codecBadge(s.codec), h("span", null, `${s.bitrate} kbps`), s.protection ? h("span", { class: "muted" }, s.protection) : null,
         h("span", { class: "spacer" }), procDot(d.audio, "audio encoder"), procDot(d.pad, "PAD encoder")),
       s.kind === "audio" ? levelMeter(d.levels, true) : null,
-      d.levels ? h("div", { class: "small muted" }, `Levels from ${d.levels.src === "dabmux" ? "odr-dabmux input" : "the encoder"}` + (d.input_state ? ` · input ${d.input_state}` : "") +
+      d.levels ? h("div", { class: "small muted" }, `Levels from ${d.levels.src === "dabmux" ? "odr-dabmux input" : "the encoder"}` +
+        (d.input_state ? ` · odr-dabmux state ${d.input_state}` + (String(d.input_state).startsWith("Unstable") && !d.glitching ? " (it keeps this for 30 min after glitches; none in the last minute)" : "") : "") +
         (d.buffer && d.buffer.min != null ? ` · buffer ${d.buffer.min}–${d.buffer.max} frames, ${d.buffer.underruns || 0} underruns, ${d.buffer.overruns || 0} overruns` : "")) : null,
       h("div", { class: "card card-pad" }, h("div", { class: "small muted" }, d.onair && d.onair.dls ? "DLS on air" : "DLS (from the encoder's text file)"), h("div", { class: "dls big" }, dlsTxt || "—"),
+        d.dls && d.dls.dlplus && d.dls.dlplus.items.length ? h("div", { class: "row wrap tight dlp-items" }, h("span", { class: "dlp" }, "DL+"),
+          d.dls.dlplus.items.map((it) => h("span", { class: "chip" }, h("span", { class: "muted" }, it.name + ": "), it.text)),
+          d.dls.dlplus.running ? null : h("span", { class: "chip" }, "item not running")) : null,
         d.dls && d.dls.mtime ? h("div", { class: "small muted" }, "Updated " + fmtAgo(d.dls.mtime)) : null),
       d.onair && d.onair.slide ? h("div", { class: "stack tight" }, h("div", { class: "small muted" }, "Slide on air"),
         h("img", { class: "onair-slide", src: `/api/monitor/${s.id}/onair-slide?t=${d.onair.slide.ts}`, alt: "On-air slide" })) : null,
@@ -1239,7 +1248,7 @@ async function pageLinking(root) {
       ls.list = ls.list || {};
       const flags = [["active", "Active"], ["hard", "Hard link (same programme)"], ["international", "International (other ECC)"]].map(([f, l]) => { const t = toggle(l, tf(ls[f]), { disabled: ro }); bind(ls, f, t.box, (v) => v ? "true" : "false"); return t.el; });
       const list = blockList({ title: "Add linked service", items: ls.list, ro, empty: "No linked services yet.",
-        add: () => ({ type: "fm", id: "0x", ecc: "" }),
+        add: () => ({ type: "fm" }),
         render: (kk, it) => h("div", { class: "grid-3" },
           field("Type", bind(it, "type", sel(it.type, [["fm", "FM (RDS PI)"], ["dab", "DAB (SId)"], ["drm", "DRM"], ["amss", "AMSS"]], { disabled: ro }))),
           field(it.type === "fm" ? "PI code" : "Id", bind(it, "id", inp(it.id, { class: "mono", disabled: ro }))),
@@ -1248,10 +1257,10 @@ async function pageLinking(root) {
         field("Key service", bind(ls, "keyservice", sel(ls.keyservice, svcOpts, { disabled: ro })))), h("div", { class: "row wrap" }, flags), list);
     } });
   const fiEditor = blockList({ title: "Add frequency list", items: fi, ro, empty: "No frequency information.",
-    add: () => ({ range_modulation: "fm", continuity: "true", pi_code: "0x", frequencies: "" }),
+    add: () => ({ range_modulation: "fm", continuity: "true" }),
     render: (k, f, redraw) => {
       const mod = bind(f, "range_modulation", sel(f.range_modulation, [["fm", "FM"], ["dab", "DAB"], ["drm", "DRM"], ["amss", "AMSS"]], { disabled: ro }));
-      mod.addEventListener("change", () => { if (f.range_modulation === "dab") { delete f.pi_code; f.eid = f.eid || "0x"; f.frequencies = typeof f.frequencies === "object" ? f.frequencies : {}; } else { delete f.eid; f.frequencies = typeof f.frequencies === "string" ? f.frequencies : ""; } redraw(); });
+      mod.addEventListener("change", () => { if (f.range_modulation === "dab") { delete f.pi_code;  f.frequencies = typeof f.frequencies === "object" ? f.frequencies : {}; } else { delete f.eid; f.frequencies = typeof f.frequencies === "string" ? f.frequencies : ""; } redraw(); });
       const cont = toggle("Continuity (same programme, seamless)", tf(f.continuity), { disabled: ro }); bind(f, "continuity", cont.box, (v) => v ? "true" : "false");
       let freqs;
       if (f.range_modulation === "dab") {
@@ -1270,7 +1279,7 @@ async function pageLinking(root) {
         h("div", { class: "field" }, h("label", null, " "), cont.el)), freqs);
     } });
   const othEditor = blockList({ title: "Add other-ensemble service", items: oth, ro, empty: "No services announced in other ensembles (FIG 0/24).",
-    add: () => ({ id: "0x", other_ensembles: "" }),
+    add: () => ({}),
     render: (k, o) => h("div", { class: "grid-2" }, field("SId", bind(o, "id", inp(o.id, { class: "mono", disabled: ro }))),
       field("Other ensembles (EIds, comma separated)", bind(o, "other_ensembles", inp(o.other_ensembles || "", { class: "mono", disabled: ro })))) });
   put(root, h("div", { class: "page-head" }, h("div", null, h("h1", null, "Linking & frequency information"), h("p", null, "Tell receivers where else each service can be heard (FM, other DAB muxes)."))),
@@ -1468,7 +1477,17 @@ async function pageChecks(root) {
   setCrumbs("Checks");
   const r = await api("GET", "/api/checks");
   const by = (s) => r.issues.filter((i) => i.severity === s);
-  put(root, h("div", { class: "page-head" }, h("div", null, h("h1", null, "Checks"), h("p", null, "Problems found in the configuration as it will be after Apply."))),
+  const dmOut = h("div");
+  const testBtn = isEditor() ? btn("Test with odr-dabmux", { icon: "play", onclick: async () => {
+    testBtn.disabled = true; put(clear(dmOut), h("div", { class: "banner blue" }, h("span", { class: "spin" }), "Running odr-dabmux on a sandboxed copy…"));
+    try {
+      const r = await api("POST", "/api/checks/dabmux", {});
+      put(clear(dmOut), h("div", { class: "banner " + (r.skipped ? "amber" : r.ok ? "green" : "red") }, icon(r.ok ? "check" : "alert"), h("div", { class: "grow" }, r.message)),
+        r.log ? h("details", null, h("summary", null, "odr-dabmux output"), h("div", { class: "code log" }, r.log)) : null);
+    } finally { testBtn.disabled = false; }
+  } }) : null;
+  put(root, h("div", { class: "page-head" }, h("div", null, h("h1", null, "Checks"), h("p", null, "Problems found in the configuration as it will be after Apply. Apply also test-runs odr-dabmux on the new config and refuses to write one it rejects.")),
+    h("span", { class: "spacer" }), testBtn), dmOut,
     h("div", { class: "stats" }, ["error", "warning", "info"].map((s) => h("div", { class: "stat" }, h("span", null, s === "error" ? "Errors" : s === "warning" ? "Warnings" : "Notes"), h("b", null, by(s).length)))),
     h("div", { class: "section-gap" }), issueList(r.issues));
 }
@@ -1486,7 +1505,15 @@ async function pageChanges(root) {
       showResult(r);
     } catch (e) {
       if (e.status === 409) {
-        const r2 = await fetch("/api/apply", { method: "POST", headers: { "X-Requested-With": "odr-mux", "X-CSRF-Token": S.csrf, "Content-Type": "application/json" }, body: JSON.stringify({ force: false }) }).then((x) => x.json());
+        const r2 = await fetch("/api/apply", { method: "POST", headers: { "X-Requested-With": "odr-mux", "X-CSRF-Token": S.csrf, "Content-Type": "application/json" }, body: JSON.stringify({ force }) }).then((x) => x.json());
+        if (r2.dabmux) {
+          // odr-dabmux itself refused the config: don't offer "apply anyway"
+          modal({ title: "odr-dabmux would not start with this config", wide: true, body: h("div", { class: "stack" },
+            h("div", { class: "banner red" }, icon("alert"), h("div", { class: "grow" }, r2.message)),
+            h("p", null, "Nothing was written; the running mux is untouched. Fix the setting under Checks / the relevant page and apply again."),
+            r2.log ? h("details", null, h("summary", null, "odr-dabmux output"), h("div", { class: "code log" }, r2.log)) : null) });
+          return;
+        }
         const m = modal({ title: "Apply anyway?", body: h("div", { class: "stack" }, h("p", null, r2.message), issueList(r2.errors || [])),
           foot: [btn("Cancel", { onclick: () => m.close() }), btn("Apply anyway", { cls: "danger", onclick: () => { m.close(); apply(true); } })] });
       } else toast(e.message, "error");
@@ -1501,7 +1528,7 @@ async function pageChanges(root) {
       d.stale ? h("div", { class: "banner red" }, icon("alert"), "The files on disk changed since these edits started (someone edited them by hand). Applying will overwrite those changes. Discard the draft to start from the files on disk.") : null,
       h("div", { class: "row" }, h("h3", null, "Unapplied changes"), h("span", { class: "spacer" }),
         isEditor() ? btn("Discard", { cls: "ghost danger", icon: "trash", onclick: async () => { if (await confirmDialog("Throw away all unapplied changes?", { danger: true, okText: "Discard" })) { await api("POST", "/api/draft/discard", {}); pokeStatus(); route(); } } }) : null,
-        isEditor() ? btn("Apply now", { cls: "primary", icon: "zap", onclick: async () => { if (await confirmDialog("Write the files, update supervisor and restart odr-dabmux if the mux changed? A backup is taken first.", { okText: "Apply" })) apply(); } }) : null),
+        isEditor() ? btn("Apply now", { cls: "primary", icon: "zap", onclick: async () => { if (await confirmDialog("Write the files and reload supervisor / odr-dabmux as set in Settings (reread/update, or a full supervisor restart)? A backup is taken first.", { okText: "Apply" })) apply(); } }) : null),
       h("ul", { class: "small" }, d.log.map((l) => h("li", null, `${fmtDate(l.ts)} · ${l.user}: ${l.summary}`))),
       fsOps.length ? h("div", { class: "banner amber" }, icon("folder"), h("div", { class: "grow" }, h("b", null, "Folder changes: "), h("ul", null, fsOps.map((o) => h("li", { class: "mono small" },
         o.op === "move_many" ? o.moves.map((mv) => `${mv.from} → ${mv.to}`).join("; ") : o.op === "archive" ? `archive ${o.path} → ${o.to}` : `${o.op} ${o.path}`))))) : null,
@@ -1625,6 +1652,9 @@ async function pageSettings(root) {
   const f = (k, attrs = {}) => inp(s[k] ?? "", attrs);
   const sock = f("supervisor_socket", { class: "mono" }), ctl = f("supervisorctl", { class: "mono" }), sconf = f("supervisor_conf", { class: "mono", placeholder: "default" });
   const restart = f("dabmux_restart", { class: "mono", placeholder: "auto" });
+  const reloadMode = sel(s.supervisor_reload || "update", [["update", "reread + update: only changed programs restart"], ["restart", "restart the supervisor service: everything restarts"]]);
+  const restartCmd = f("supervisor_restart_cmd", { class: "mono", placeholder: "sudo -n systemctl restart supervisor" });
+  const sudoMode = sel(s.supervisor_sudo || "auto", [["auto", "use sudo supervisorctl when the socket is root-only"], ["always", "always use sudo supervisorctl"], ["never", "never use sudo"]]);
   const run = toggle("Run supervisor / odr-dabmux commands on Apply", s.run_commands);
   const levels = sel(s.levels_source, [["dabmux", "odr-dabmux management port (no extra sockets)"], ["stats", "odr-audioenc --stats sockets"], ["both", "Both (encoder sockets when free)"]]);
   const mgmt = f("dabmux_mgmt", { class: "mono", placeholder: "from the mux file" }), onair = f("onair_edi", { class: "mono", placeholder: "auto" });
@@ -1647,7 +1677,9 @@ async function pageSettings(root) {
       } }))),
     h("div", { class: "card card-pad stack mt" }, h("h3", null, "Control"),
       h("div", { class: "grid-3" }, field("supervisord socket", sock), field("supervisorctl", ctl), field("supervisord.conf", sconf)),
+      h("div", { class: "grid-2" }, field("After Apply", reloadMode, { hint: "Restarting the service briefly takes every station off air." }), field("Service restart command", restartCmd)),
       field("Restart odr-dabmux with", restart, { hint: "auto (a supervisor program running odr-dabmux), none, supervisor:<program>, systemd:<unit> or command:<shell command>." }),
+      field("Permissions", sudoMode, { hint: "The default supervisor socket is root-only; the installer adds a sudoers rule so the manager can use sudo -n supervisorctl." }),
       run.el),
     h("div", { class: "card card-pad stack mt" }, h("h3", null, "Monitoring"),
       h("div", { class: "grid-2" }, field("Audio levels from", levels), field("odr-dabmux management endpoint", mgmt)),
@@ -1661,6 +1693,7 @@ async function pageSettings(root) {
     h("div", { class: "row mt" }, h("span", { class: "spacer" }), btn("Save settings", { cls: "primary", onclick: async () => {
       try {
         await api("PUT", "/api/settings", { supervisor_socket: sock.value, supervisorctl: ctl.value, supervisor_conf: sconf.value, dabmux_restart: restart.value || "auto", run_commands: run.box.checked,
+          supervisor_reload: reloadMode.value, supervisor_restart_cmd: restartCmd.value || "sudo -n systemctl restart supervisor", supervisor_sudo: sudoMode.value,
           levels_source: levels.value, dabmux_mgmt: mgmt.value, onair_edi: onair.value || "auto", silence_db: sdb.value, silence_secs: ssec.value, stats_dir: statsDir.value, encoder_user: encUser.value,
           tool_paths: Object.fromEntries(tools.map(([t, i]) => [t, i.value])) });
         toast("Saved.", "ok");
