@@ -1,0 +1,855 @@
+general {
+    dabmode 1
+    nbframes 0
+    syslog false
+    tist false
+    managementport 12720
+}
+
+remotecontrol {
+    telnetport 12721
+    zmqendpoint tcp://lo:12722
+}
+
+ensemble {
+    id 0x2EA1
+    ecc 0xe3
+    local-time-offset auto
+    international-table 1
+    reconfig-counter hash
+    label "MPBNL DAB1"
+    shortlabel "MPB DAB1"
+}
+
+linking {
+    set-mpb1 {
+        ; Linkage Set Number, 12-bit, must be unique within the country
+        lsn 0x491
+        active true
+        hard true
+        ; international because the linked DAB service uses a different ECC (E1)
+        international true
+        keyservice srv-01
+        list {
+            mpb1-fm {
+                type fm
+                id 0x2491
+                ecc 0xe3
+            }
+            mpb1-dab-5a {
+                ; MPB Radio 1 on 5A, EId 0xCFCB
+                type dab
+                id 0xC249
+                ecc 0xe1
+            }
+        }
+    }
+    set-mpb2 {
+        lsn 0x492
+        active true
+        hard true
+        international true
+        keyservice srv-02
+        list {
+            mpb2-fm {
+                type fm
+                id 0x2492
+                ecc 0xe3
+            }
+            mpb2-dab-5a {
+                ; MPB Radio 2 on 5A, EId 0xCFCB
+                type dab
+                id 0x2492
+                ecc 0xe3
+            }
+        }
+    }
+}
+
+frequency_information {
+    fi-mpb1-fm {
+        range_modulation fm
+        continuity true
+        pi_code 0x2491
+        frequencies "98.2 97.4 99.7 100.3 103.3 107.8"
+    }
+    fi-mpb2-fm {
+        range_modulation fm
+        continuity true
+        pi_code 0x2492
+        frequencies "94.6 94.9"
+    }
+    fi-dab-cfcb {
+        range_modulation dab
+        continuity true
+        eid 0xCFCB
+        frequencies {
+            ch-5a {
+                ; Block 5A = 174.928 MHz
+                frequency 174.928
+                signal_mode_1 true
+                adjacent true
+            }
+        }
+    }
+}
+
+services {
+    srv-01 {
+        id 0x2491
+        ecc 0xe3
+        label "MPB Radio 1"
+        shortlabel "MPB Rad1"
+        pty 10
+        pty-sd dynamic
+        language 0x09
+    }
+    srv-02 {
+        id 0x2492
+        ecc 0xe3
+        label "MPB Radio 2"
+        shortlabel "MPB Rad2"
+        pty 12
+        pty-sd dynamic
+        language 0x09
+    }
+    srv-03 {
+        id 0x2493
+        ecc 0xe3
+        label "RaidiÃ³ RÃ­-RÃ¡"
+        shortlabel "RÃ­-RÃ¡"
+        pty 10
+        pty-sd static
+        language 0x11
+    }
+    srv-04 {
+        id 0x2495
+        ecc 0xe3
+        label "S21 Radio"
+        shortlabel "S21Radio"
+        pty 28
+        pty-sd static
+        language 0x24
+    }
+    srv-05 {
+        id 0x2496
+        ecc 0xe3
+        label "S21 Euro"
+        shortlabel "S21 Euro"
+        pty 15
+        pty-sd static
+        language 0x09
+    }
+    srv-06 {
+        id 0x2497
+        ecc 0xe3
+        label "MPB Radio 1 Dnce"
+        shortlabel "MPB R1D"
+        pty 10
+        pty-sd static
+        language 0x09
+    }
+    srv-07 {
+        id 0x2498
+        ecc 0xe3
+        label "MPB Radio 2 90s"
+        shortlabel "MPB2 90s"
+        pty 15
+        pty-sd static
+        language 0x09
+    }
+    srv-08 {
+        id 0x9202
+        ecc 0xe4
+        label "Val 202"
+        shortlabel "Val 202"
+        pty 10
+        pty-sd static
+        language 0x26
+    }
+    srv-09 {
+        id 0x2490
+        ecc 0xe3
+        label "S21 Punk"
+        shortlabel "S21 Punk"
+        pty 15
+        pty-sd static
+        language 0x24
+    }
+    srv-10 {
+        id 0xE019
+        ecc 0xe1
+        label "Play Radio"
+        shortlabel "Play"
+        pty 15
+        pty-sd static
+        language 0x22
+    }
+    srv-11 {
+        id 0x2499
+        ecc 0xe3
+        label "MPB Radio 2 80s"
+        shortlabel "MPB2 80s"
+        pty 27
+        pty-sd dynamic
+        language 0x09
+    }
+    srv-12 {
+        id 0x224C
+        ecc 0xe3
+        label "Energy 106"
+        shortlabel "Energy"
+        pty 10
+        pty-sd static
+        language 0x09
+    }
+    srv-13 {
+        id 0x80AA
+        ecc 0xe1
+        label "Note FM"
+        shortlabel "Note FM"
+        pty 10
+        pty-sd static
+        language 0x77
+    }
+    srv-14 {
+        id 0x80AB
+        ecc 0xe1
+        label "Radio Nostalgia"
+        shortlabel "Nostlgia"
+        pty 10
+        pty-sd static
+        language 0x77
+    }
+    srv-15 {
+        id 0x80AC
+        ecc 0xe1
+        label "Radio Variant"
+        shortlabel "Variant"
+        pty 15
+        pty-sd static
+        language 0x77
+    }
+    srv-16 {
+        id 0x3010
+        ecc 0xe2
+        label "Radio MIX"
+        shortlabel "RadioMIX"
+        pty 10
+        pty-sd static
+        language 0x20
+    }
+    srv-18 {
+        id 0x249A
+        ecc 0xe3
+        label "MPB Radio 1 10s"
+        shortlabel "MPB R1 1"
+        pty 10
+        pty-sd static
+        language 0x09
+    }
+    srv-19 {
+        id 0xF204
+        ecc 0xe1
+        label "FIP"
+        shortlabel "FIP"
+        pty 0
+        pty-sd static
+        language 0x0F
+    }
+    srv-20 {
+        id 0x286B
+        ecc 0xe3
+        label "Energy Dance"
+        shortlabel "Energy D"
+        pty 10
+        pty-sd static
+        language 0x09
+    }
+    srv-21 {
+        id 0x28A4
+        ecc 0xe3
+        label "RADIO FUEGO"
+        shortlabel "FUEGO"
+        pty 10
+        pty-sd static
+        language 0x0F
+    }
+    srv-22 {
+        id 0x28A0
+        ecc 0xe3
+        label "The Beat"
+        shortlabel "The Beat"
+        pty 15
+        pty-sd static
+        language 0x11
+    }
+    srv-23 {
+        id 0x249C
+        ecc 0xe3
+        label "Le MiXX Radio"
+        shortlabel "Le MiXX"
+        pty 27
+        pty-sd static
+        language 0x0F
+    }
+    srv-24 {
+        id 0x2156
+        ecc 0xe3
+        label "Coast FM"
+        shortlabel "Coast FM"
+        pty 9
+        pty-sd static
+        language 0x09
+    }
+    srv-25 {
+        id 0x2301
+        ecc 0xe3
+        label "Energy Canary Is"
+        shortlabel "EnergyCI"
+        pty 10
+        pty-sd static
+        language 0x09
+    }
+    srv-spi {
+        label "MPBNL Mux 1 Data"
+        shortlabel "MPBNL"
+        ; the service-ID consists of 8 hex digits for packet data services. Usually the first two digits will
+        ; be the same as your ECC, and the third digit will be the same as the first digit in your Ensemble Id.
+        id 0xe3222344
+    }
+}
+
+subchannels {
+    sub-01 {
+        type dabplus
+        bitrate 128
+        id 1
+	protection-profile EEP_B
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9001"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-02 {
+        type dabplus
+        bitrate 128
+        id 2
+	protection-profile EEP_B
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:2492"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-03 {
+        type dabplus
+        bitrate 96
+        id 3
+	protection-profile EEP_B
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9003"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-04 {
+        type dabplus
+        bitrate 48
+        id 4
+	protection-profile EEP_A
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9005"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-05 {
+        type dabplus
+        bitrate 48
+        id 5
+	protection-profile EEP_A
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9006"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-06 {
+        type dabplus
+        bitrate 96
+        id 6
+	protection-profile EEP_B
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9007"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-07 {
+        type dabplus
+        bitrate 96
+        id 7
+	protection-profile EEP_B
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9008"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-08 {
+        type dabplus
+        bitrate 96
+        id 8
+	protection-profile EEP_B
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9009"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-09 {
+        type dabplus
+        bitrate 48
+        id 9
+	protection-profile EEP_A
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9010"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-10 {
+        type dabplus
+        bitrate 64
+        id 10
+	protection-profile EEP_B
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9011"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-11 {
+        type dabplus
+        bitrate 96
+        id 11
+	protection-profile EEP_B
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9012"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-12 {
+        type dabplus
+        bitrate 48
+        id 12
+	protection-profile EEP_A
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9013"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-13 {
+        type dabplus
+        bitrate 96
+        id 13
+	protection-profile EEP_B
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9014"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-14 {
+        type dabplus
+        bitrate 96
+        id 14
+	protection-profile EEP_B
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9015"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-15 {
+        type dabplus
+        bitrate 96
+        id 15
+        protection 4
+	protection-profile EEP_B
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9016"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-16 {
+        type dabplus
+        bitrate 48
+        id 16
+	protection-profile EEP_A
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9017"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-18 {
+        type dabplus
+        bitrate 96
+        id 18
+	protection-profile EEP_B
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9019"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    } 
+    sub-19 {
+        type dabplus
+        bitrate 48
+        id 19
+	protection-profile EEP_A
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9020"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    } 
+    sub-20 {
+        type dabplus
+        bitrate 40
+        id 20
+	protection-profile EEP_A
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9021"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    } 
+    sub-21 {
+        type dabplus
+        bitrate 48
+        id 21
+	protection-profile EEP_A
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9022"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-22 {
+        type dabplus
+        bitrate 64
+        id 22
+	protection-profile EEP_B
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9023"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-23 {
+        type dabplus
+        bitrate 48
+        id 23
+	protection-profile EEP_A
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9024"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-24 {
+        type dabplus
+        bitrate 48
+        id 24
+	protection-profile EEP_A
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9025"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-25 {
+        type dabplus
+        bitrate 48
+        id 25
+	protection-profile EEP_A
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9026"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-spi {
+        ; type packet or enhancedpacket can be used for SPI.
+        type enhancedpacket
+        ; if you change the bitrate, remember to also change the packet size accordingly (see above) and generate your SPI again.
+        bitrate 32
+        protection-profile EEP_B
+        protection 3
+        ; inputuri is the path and filename for your output file from generate-epg
+        inputuri "/home/ryan/dab/local-SPI-generator/output/output.dat"
+        inputproto file
+    }
+}
+
+components {
+    comp-01 {
+        service srv-01
+        subchannel sub-01
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-02 {
+        service srv-02
+        subchannel sub-02
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-03 {
+        service srv-03
+        subchannel sub-03
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-04 {
+        service srv-04
+        subchannel sub-04
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-05 {
+        service srv-05
+        subchannel sub-05
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-06 {
+        service srv-06
+        subchannel sub-06
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-06-sub {
+        label "MPB Radio 1 MixM"
+        shortlabel "MPB R1 M"
+        service srv-01
+        subchannel sub-06
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-07 {
+        service srv-07
+        subchannel sub-07
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-07-sub {
+        label "MPB Radio 2 90s"
+        shortlabel "MPB R2 9"
+        service srv-02
+        subchannel sub-07
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-08 {
+        service srv-08
+        subchannel sub-08
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-09 {
+        service srv-09
+        subchannel sub-09
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-10 {
+        service srv-10
+        subchannel sub-10
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-11 {
+        service srv-11
+        subchannel sub-11
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-11-sub {
+        label "MPB Radio 2 80s"
+        shortlabel "MPB2 80s"
+        service srv-02
+        subchannel sub-11
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-12 {
+        service srv-12
+        subchannel sub-12
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-13 {
+        service srv-13
+        subchannel sub-13
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-14 {
+        service srv-14
+        subchannel sub-14
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-15 {
+        service srv-15
+        subchannel sub-15
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-16 {
+        service srv-16
+        subchannel sub-16
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-18 {
+        service srv-18
+        subchannel sub-18
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-18-sub {
+        label "MPB Radio 1 10s"
+        shortlabel "MPB R1 1"
+        service srv-01
+        subchannel sub-18
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-19 {
+        service srv-19
+        subchannel sub-19
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-20 {
+        service srv-20
+        subchannel sub-20
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-21 {
+        service srv-21
+        subchannel sub-21
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-22 {
+        service srv-22
+        subchannel sub-22
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-23 {
+        service srv-23
+        subchannel sub-23
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-24 {
+        service srv-24
+        subchannel sub-24
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-25 {
+        service srv-25
+        subchannel sub-25
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-spi {
+        type 60
+        service srv-spi
+        subchannel sub-spi
+        user-applications {
+            userapp "spi"
+        }
+        address 0x1
+        datagroup true
+    }
+}
+
+outputs {
+    edi {
+        destinations {
+            edi_tcp {
+                protocol tcp
+                listenport 9201
+            }
+        }
+    }
+
+    ; Throttle output to real-time (one ETI frame every 24ms)
+    zmq "zmq+tcp://*:18081"
+    throttle "simul://"
+}

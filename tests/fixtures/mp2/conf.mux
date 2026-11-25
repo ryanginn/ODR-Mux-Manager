@@ -1,0 +1,515 @@
+general {
+    dabmode 1
+    nbframes 0
+    syslog false
+    tist false
+    managementport 12720
+}
+
+remotecontrol {
+    telnetport 12721
+}
+
+ensemble {
+    id 0x2EA2
+    ecc 0xe3
+    local-time-offset auto
+    label "MPBNL DAB2"
+    shortlabel "MPB DAB2"
+}
+
+services {
+    srv-01 {
+        id 0x2501
+        label "RTE Radio 1"
+        shortlabel "RTE Radi"
+        pty 10
+    }
+    srv-02 {
+        id 0x2502
+        label "RTE 2FM"
+        shortlabel "RTE 2FM"
+        pty 10
+    }
+    srv-03 {
+        id 0x2503
+        label "RTE lyric fm"
+        shortlabel "RTE lyri"
+        pty 10
+    }
+    srv-04 {
+        id 0x2504
+        label "RTE RnaG"
+        shortlabel "RTE RnaG"
+        pty 10
+    }
+    srv-05 {
+        id 0x2505
+        label "RTE Gold"
+        shortlabel "RTE Gold"
+        pty 10
+    }
+    srv-06 {
+        id 0x2506
+        label "Today FM"
+        shortlabel "Today FM"
+        pty 10
+    }
+    srv-07 {
+        id 0x2507
+        label "Newstalk"
+        shortlabel "Newstalk"
+        pty 10
+    }
+    srv-08 {
+        id 0x2508
+        label "Classic Hits"
+        shortlabel "Classic "
+        pty 10
+    }
+    srv-09 {
+        id 0x2509
+        label "KISS"
+        shortlabel "KISS"
+        pty 10
+    }
+    srv-10 {
+        id 0x2510
+        label "KISS+"
+        shortlabel "KISS+"
+        pty 10
+    }
+    srv-11 {
+        id 0x2511
+        label "NRJ"
+        shortlabel "NRJ"
+        pty 10
+    }
+    srv-12 {
+        id 0x2512
+        label "TGB Radio 1"
+        shortlabel "TGB Radi"
+        pty 10
+    }
+    srv-13 {
+        id 0x2513
+        label "TGB Radio 2"
+        shortlabel "TGB Radi"
+        pty 10
+    }
+    srv-14 {
+        id 0x2514
+        label "Pol FM"
+        shortlabel "Pol FM"
+        pty 10
+    }
+    srv-15 {
+        id 0x2515
+        label "TGB 3"
+        shortlabel "TGB 3"
+        pty 10
+    }
+    srv-16 {
+        id 0x2516
+        label "KISS 97"
+        shortlabel "KISS 97"
+        pty 10
+    }
+    srv-17 {
+        id 0x2517
+        label "98 Rock"
+        shortlabel "98 Rock"
+        pty 10
+    }
+    srv-18 {
+        id 0x2518
+        label "Hit FM"
+        shortlabel "Hit FM"
+        pty 10
+    }
+    srv-19 {
+        id 0x2519
+        label "Sea FM"
+        shortlabel "Sea FM"
+        pty 10
+    }
+}
+
+subchannels {
+    sub-01 {
+        type audio
+        bitrate 128
+        id 1
+        protection-profile UEP
+        protection 3
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9001"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-02 {
+        type audio
+        bitrate 128
+        id 2
+        protection-profile UEP
+        protection 3
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9002"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-03 {
+        type audio
+        bitrate 160
+        id 3
+        protection-profile UEP
+        protection 3
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9003"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-04 {
+        type audio
+        bitrate 128
+        id 4
+        protection-profile UEP
+        protection 3
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9004"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-05 {
+        type audio
+        bitrate 128
+        id 5
+        protection-profile UEP
+        protection 3
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9005"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-06 {
+        type dabplus
+        bitrate 128
+        id 6
+        protection-profile EEP_B
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9006"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-07 {
+        type dabplus
+        bitrate 64
+        id 7
+        protection-profile EEP_B
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9007"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-08 {
+        type dabplus
+        bitrate 32
+        id 8
+        protection-profile EEP_B
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9008"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-09 {
+        type audio
+        bitrate 256
+        id 9
+        protection-profile UEP
+        protection 3
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9009"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-10 {
+        type dabplus
+        bitrate 48
+        id 10
+        protection-profile EEP_A
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9010"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-11 {
+        type dabplus
+        bitrate 128
+        id 11
+        protection-profile EEP_B
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9011"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-12 {
+        type dabplus
+        bitrate 48
+        id 12
+        protection-profile EEP_A
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9012"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-13 {
+        type dabplus
+        bitrate 48
+        id 13
+        protection-profile EEP_A
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9013"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-14 {
+        type dabplus
+        bitrate 48
+        id 14
+        protection-profile EEP_A
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9014"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-15 {
+        type dabplus
+        bitrate 48
+        id 15
+        protection-profile EEP_A
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9015"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-16 {
+        type dabplus
+        bitrate 48
+        id 16
+        protection-profile EEP_A
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9016"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-17 {
+        type dabplus
+        bitrate 48
+        id 17
+        protection-profile EEP_A
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9017"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-18 {
+        type dabplus
+        bitrate 48
+        id 18
+        protection-profile EEP_A
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9018"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+    sub-19 {
+        type dabplus
+        bitrate 48
+        id 19
+        protection-profile EEP_A
+        protection 4
+        inputproto edi
+        inputuri "tcp://0.0.0.0:9019"
+        buffer-management prebuffering
+        buffer 40
+        prebuffering 20
+    }
+}
+
+components {
+    comp-01 {
+        service srv-01
+        subchannel sub-01
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-02 {
+        service srv-02
+        subchannel sub-02
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-03 {
+        service srv-03
+        subchannel sub-03
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-04 {
+        service srv-04
+        subchannel sub-04
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-05 {
+        service srv-05
+        subchannel sub-05
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-06 {
+        service srv-06
+        subchannel sub-06
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-07 {
+        service srv-07
+        subchannel sub-07
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-08 {
+        service srv-08
+        subchannel sub-08
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-09 {
+        service srv-09
+        subchannel sub-09
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-10 {
+        service srv-10
+        subchannel sub-10
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-11 {
+        service srv-11
+        subchannel sub-11
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-12 {
+        service srv-12
+        subchannel sub-12
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-13 {
+        service srv-13
+        subchannel sub-13
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-14 {
+        service srv-14
+        subchannel sub-14
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-15 {
+        service srv-15
+        subchannel sub-15
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-16 {
+        service srv-16
+        subchannel sub-16
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-17 {
+        service srv-17
+        subchannel sub-17
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-18 {
+        service srv-18
+        subchannel sub-18
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+    comp-19 {
+        service srv-19
+        subchannel sub-19
+        user-applications {
+            userapp "slideshow"
+        }
+    }
+}
+
+outputs {
+    edi {
+        destinations {
+            edi_tcp {
+                protocol tcp
+                listenport 9201
+            }
+        }
+    }
+    throttle "simul://"
+}

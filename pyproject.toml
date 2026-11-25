@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "odr-mux-manager"
+dynamic = ["version"]
+description = "Web UI to manage and monitor ODR-DabMux multiplexes and their supervisor-run encoders"
+readme = "README.md"
+license = { text = "GPL-3.0-or-later" }
+requires-python = ">=3.9"
+dependencies = [
+    "Flask>=2.2",
+    "cheroot>=8.6",
+    "pyzmq>=22",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.scripts]
+odr-mux-manager = "odr_mux.__main__:main"
+
+[tool.setuptools]
+packages = ["odr_mux", "odr_mux.web"]
+
+[tool.setuptools.dynamic]
+version = { attr = "odr_mux.__version__" }
+
+[tool.setuptools.package-data]
+"odr_mux.web" = ["static/*"]
