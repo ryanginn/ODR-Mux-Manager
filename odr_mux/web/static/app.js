@@ -679,6 +679,12 @@ function cuBar(total, segs, draftUsed, opts = {}) {
     seg.addEventListener("mousemove", (ev) => showTip(ev, [h("span", { class: "cu-tip-k" }, "Unapplied:"), h("b", null, `${diff > 0 ? "+" : ""}${diff} CU`)]));
     bar.appendChild(seg);
   }
+  if (used < total) {
+    // free capacity: takes the rest of the bar, and gives way when tiny segments need their minimum width
+    const free = h("i", { class: "seg free" });
+    free.addEventListener("mousemove", (ev) => showTip(ev, [h("span", { class: "cu-tip-k" }, "Free:"), h("span", { class: "cu-tip-cu" }, `${total - used} CU`)]));
+    bar.appendChild(free);
+  }
   const over = Math.max(used, draftUsed || 0) > total;
   return h("div", { class: "cu-wrap" + (over ? " over" : "") },
     h("div", { class: "row" }, icon("activity"), h("b", null, "Capacity (CU)"), h("span", { class: "spacer" }),
