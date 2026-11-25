@@ -185,9 +185,12 @@ const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = se
 
 /* ============================== modal helpers ============================== */
 
+const OPEN_MODALS = new Set();
+function closeAllModals() { for (const c of [...OPEN_MODALS]) c(); }
 function modal({ title, body, foot, wide = false, onclose }) {
   const back = h("div", { class: "modal-back" });
-  const close = () => { back.remove(); document.removeEventListener("keydown", esc); onclose && onclose(); };
+  const close = () => { OPEN_MODALS.delete(close); back.remove(); document.removeEventListener("keydown", esc); onclose && onclose(); };
+  OPEN_MODALS.add(close);
   const esc = (e) => { if (e.key === "Escape") close(); };
   document.addEventListener("keydown", esc);
   const box = h("div", { class: "modal" + (wide ? " wide" : ""), role: "dialog", "aria-modal": "true" },
@@ -562,6 +565,7 @@ function setCrumbs(...parts) {
 function route() {
   if (!shellEls) return;
   stopMon();
+  closeAllModals();
   const parts = (location.hash.replace(/^#\/?/, "") || "monitor").split("/");
   const key = parts[0];
   shellEls.nav.querySelectorAll("a").forEach((a) => a.classList.toggle("active", a.dataset.key === key));
@@ -825,7 +829,7 @@ async function pageStations(root, parts) {
   const audio = d.stations.filter((s) => s.kind !== "data");
   let order = audio.map((s) => s.id);
   let removed = new Set();
-  let mode = "renumber";
+  let mode = "keep";
   const byId = Object.fromEntries(d.stations.map((s) => [s.id, s]));
   const tbody = h("tbody");
   const changed = () => removed.size > 0 || order.join() !== audio.map((s) => s.id).join();
@@ -851,7 +855,7 @@ async function pageStations(root, parts) {
     });
     clear(actions);
     if (isEditor() && changed()) {
-      actions.appendChild(h("div", { class: "segmented" }, [["renumber", "Close gaps (renumber)"], ["keep", "Keep numbers"]].map(([k, l]) =>
+      actions.appendChild(h("div", { class: "segmented" }, [["keep", "Keep numbers"], ["renumber", "Close gaps (renumber)"]].map(([k, l]) =>
         h("button", { class: mode === k ? "on" : "", onclick: () => { mode = k; draw(); } }, l))));
       actions.appendChild(btn("Undo", { cls: "ghost", onclick: () => { order = audio.map((s) => s.id); removed = new Set(); draw(); } }));
       actions.appendChild(btn("Preview changes", { cls: "primary", icon: "eye", onclick: preview }));
@@ -1392,7 +1396,7 @@ async function pageDmb(root) {
   const dmbs = st.stations.filter((s) => s.kind === "dmb");
   const ro = !isEditor();
   const steps = d.instructions || [];
-  put(root, h("div", { class: "page-head" }, h("div", null, h("h1", null, "DMB radio & TV"), h("p", null, "T-DMB services (experimental). Video and audio in MPEG-2 TS, carried in a stream-mode subchannel."))),
+  put(root, h("div", { class: "page-head" }, h("div", null, h("h1", null, "DMB radio & TV"), h("p", null, "T-DMB services: H.264 video and AAC audio as MPEG-4 Systems (IOD/OD/BIFS, SL) in MPEG-2 TS, in a stream-mode subchannel. Any ffmpeg input works."))),
     h("div", { class: "card card-pad stack" }, h("h3", null, "What this server can do"),
       h("dl", { class: "kv" }, (d.checks || []).flatMap((c) => [h("dt", null, c.label), h("dd", null, h("span", { class: "chip " + (c.ok ? "green" : c.warn ? "amber" : "red") }, icon(c.ok ? "check" : "alert"), c.detail))])),
       d.ready ? h("div", { class: "banner green" }, icon("check"), "Ready to add DMB services.") : h("div", { class: "banner amber" }, icon("alert"), h("div", { class: "grow" }, "Some parts are missing. Follow the steps below.")),
@@ -1408,20 +1412,28 @@ async function pageDmb(root) {
 function dmbAdd(d) {
   const kind = sel("radio", [["radio", "DMB Radio (audio only)"], ["tv", "DMB TV (video + audio)"]]);
   const label = inp("", { maxlength: 16 }), sid = inp("", { class: "mono", placeholder: "0x24F0" });
-  const src = inp("", { placeholder: "https://stream.example/live.m3u8 or a file" });
+  const src = inp("", { placeholder: "https://stream.example/live.m3u8, /dev/video0, a file, testsrc…" });
+  const ifmt = inp("", { class: "mono", placeholder: "auto (e.g. v4l2, decklink, alsa, lavfi)" });
+  const iopts = inp("", { class: "mono", placeholder: "e.g. -video_size 1280x720 -framerate 25" });
+  const fps = sel(15, [[12, "12 fps"], [15, "15 fps"], [24, "24 fps"], [25, "25 fps"], [30, "30 fps"]]);
+  const abr = inp("", { type: "number", placeholder: "auto" });
   const bitrate = inp("128", { type: "number", min: 32, step: 8 });
   const vbr = inp("384", { type: "number", placeholder: "video kbps" }), size = sel("320x240", [["320x240", "QVGA 320×240"], ["352x288", "CIF 352×288"], ["416x240", "WQVGA 416×240"]]);
   const prot = protectionPicker("dmb", () => bitrate.value, "EEP_A", 3);
-  const videoBox = h("div", { class: "grid-2" }, field("Picture size", size), field("Video bitrate (kbps)", vbr));
+  const videoBox = h("div", { class: "grid-3" }, field("Picture size", size), field("Frame rate", fps), field("Video bitrate (kbps, max)", vbr, { hint: "Lowered automatically to what fits." }));
   const sync = () => { videoBox.classList.toggle("hidden", kind.value !== "tv"); if (kind.value === "tv" && parseInt(bitrate.value) < 256) bitrate.value = 448; prot.calc(); };
   kind.addEventListener("change", sync); bitrate.addEventListener("input", () => prot.calc()); sync();
   const m = modal({ title: "Add DMB service", wide: true, body: h("div", { class: "stack" },
-    h("div", { class: "banner amber" }, icon("alert"), h("div", { class: "grow" }, "Experimental. DMB uses a lot of capacity and few receivers outside Korea decode it. The manager adds the Reed-Solomon outer coding that current odr-dabmux no longer does.")),
+    h("div", { class: "banner amber" }, icon("alert"), h("div", { class: "grow" }, "DMB uses a lot of capacity and few receivers outside Korea decode it. The manager packs the stream as T-DMB (MPEG-4 Systems) and adds the Reed-Solomon outer coding that current odr-dabmux no longer does.")),
     h("div", { class: "grid-3" }, field("Kind", kind), field("Label", label, { max: 16 }), field("Service id", sid)),
-    field("Source (anything ffmpeg can read)", src), h("div", { class: "grid-2" }, field("Total bitrate (kbps)", bitrate, { hint: "Subchannel size; video + audio + overhead must fit." })), videoBox, prot.el),
+    field("Source (anything ffmpeg can read)", src, { hint: "Files, http/HLS/RTMP/SRT streams, capture devices or ffmpeg test sources." }),
+    h("div", { class: "grid-2" }, field("Input format (-f)", ifmt), field("Input options", iopts, { hint: "Passed to ffmpeg before -i." })),
+    h("div", { class: "grid-2" }, field("Subchannel bitrate (kbps)", bitrate, { hint: "Video + audio + T-DMB packaging overhead must fit." }), field("Audio bitrate (kbps)", abr)),
+    videoBox, prot.el),
   foot: [btn("Cancel", { onclick: () => m.close() }), btn("Add", { cls: "primary", onclick: async () => {
     try {
       await api("POST", "/api/dmb", { kind: kind.value, label: label.value, sid: sid.value, source: src.value, bitrate: parseInt(bitrate.value), video_bitrate: parseInt(vbr.value), size: size.value,
+        input_format: ifmt.value || undefined, input_opts: iopts.value || undefined, fps: parseInt(fps.value), audio_bitrate: abr.value ? parseInt(abr.value) : undefined,
         profile: prot.prof.value === "UEP" ? "EEP_A" : prot.prof.value, protection: parseInt(prot.lvl.value) });
       toast("DMB service staged.", "ok"); m.close(); pokeStatus(); route();
     } catch (e) { /* toasted */ }

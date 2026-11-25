@@ -8,9 +8,8 @@ encoder pipeline: ffmpeg -> MPEG-2 TS -> outer coding -> paced FIFO -> odr-dabmu
 (inputproto fifo, nonblock true). The UDP input of odr-dabmux is not used: its readFrame() never
 removes consumed bytes, so it repeats the first frame forever.
 
-Limitation (see PLAN.md): full T-DMB also packs the elementary streams with MPEG-4 Systems (SL
-packets, IOD/OD/BIFS) inside the TS. ffmpeg doesn't produce that, and it isn't implemented here
-yet, so receivers that insist on TS 102 428 MPEG-4 SL won't decode the picture.
+ffmpeg encodes (any input it can open) to a plain TS; tdmb.TDMBMux re-packs it with MPEG-4 Systems
+(IOD, OD, BIFS, SL packets) as T-DMB (TS 102 428) requires.
 """
 from __future__ import annotations
 
@@ -170,8 +169,10 @@ def support(cfg: dict) -> dict:
          'detail': 'libx264' if ff and ff.get('libx264') else ('hardware encoder' if ff and ff.get('h264') else 'missing')},
         {'label': 'HE-AAC encoder', 'ok': bool(ff and ff.get('he_aac')), 'warn': True,
          'detail': 'libfdk_aac' if ff and ff.get('he_aac') else 'only AAC-LC (ffmpeg built without libfdk_aac): works, uses more bitrate'},
-        {'label': 'MPEG-4 Systems packaging (TS 102 428)', 'ok': False, 'warn': True,
-         'detail': 'not implemented yet: plain H.264/AAC in MPEG-2 TS'},
+        {'label': 'MPEG-4 Systems packaging (TS 102 428)', 'ok': True,
+         'detail': 'IOD + OD/BIFS + SL-packetized H.264/AAC (built in, verified with GPAC)'},
+        {'label': 'GPAC (optional, for checking streams)', 'ok': bool(caps['tools'].get('gpac')), 'warn': True,
+         'detail': 'found' if caps['tools'].get('gpac') else 'not installed (sudo apt install gpac)'},
     ]
     instr = []
     if not dm:
@@ -184,7 +185,7 @@ def support(cfg: dict) -> dict:
     if ff and not ff.get('he_aac'):
         instr.append({'title': 'Optional: ffmpeg with libfdk_aac for HE-AAC',
                       'text': 'Distribution ffmpeg packages leave libfdk_aac out for licensing reasons. Build ffmpeg with --enable-libfdk-aac --enable-nonfree to get HE-AAC; until then AAC-LC is used.'})
-    instr.append({'title': 'Add a DMB service here', 'text': 'The manager creates the subchannel (type dmb, UDP input) and a supervisor program that runs ffmpeg and the outer coder.'})
+    instr.append({'title': 'Add a DMB service here', 'text': 'The manager creates the subchannel (type dmb, non-blocking FIFO input) and a supervisor program that runs ffmpeg, packs the stream as T-DMB and adds the outer coding.'})
     ready = bool(dm and ff)
     note = ('Tested through odr-dabmux: the stream taken back out of the mux output passes the RS check and decodes. '
             'T-DMB needs a lot of capacity (DMB TV ~300–550 kbps ≈ 200–400 CU) and few receivers outside Korea '
@@ -204,6 +205,13 @@ def add_dmb_service(p, data: dict, cfg: dict):
     bitrate = int(data.get('bitrate') or (448 if kind == 'tv' else 128))
     if bitrate % 8:
         raise ops.OpError('Bitrate must be a multiple of 8.')
+    if not data.get('source'):
+        raise ops.OpError('Give a source ffmpeg can open (file, URL, device or test source).')
+    try:
+        budget(kind, bitrate, int(data.get('video_bitrate') or 320), data.get('audio_bitrate'), False,
+               int(data.get('fps') or 15))
+    except ValueError as e:
+        raise ops.OpError(str(e))
     port = int(data.get('port') or ops.next_port(p))
     svcs, subs, comps = p.sec('services', create=True), p.sec('subchannels', create=True), p.sec('components', create=True)
     base = 'dmb-' + (ops.slug(label)[:10] or 'svc')
@@ -237,8 +245,15 @@ def add_dmb_service(p, data: dict, cfg: dict):
     exe = cfg.get('manager_exe') or 'odr-mux-manager'
     argv = [exe, 'dmb-encode', f'--fifo={fifo}', f'--kind={kind}', f'--bitrate={bitrate}',
             f'--source={data.get("source") or ""}']
+    if data.get('input_format'):
+        argv.append(f'--input-format={data["input_format"]}')
+    if data.get('input_opts'):
+        argv.append(f'--input-opts={data["input_opts"]}')
+    if data.get('audio_bitrate'):
+        argv.append(f'--audio-bitrate={int(data["audio_bitrate"])}')
     if kind == 'tv':
-        argv += [f'--video-bitrate={int(data.get("video_bitrate") or 320)}', f'--size={data.get("size") or "320x240"}']
+        argv += [f'--video-bitrate={int(data.get("video_bitrate") or 320)}', f'--size={data.get("size") or "320x240"}',
+                 f'--fps={int(data.get("fps") or 15)}']
     f = ops.encoder_file(p)
     name = 'odr-dmbencoder-' + ops.slug(label)
     entries = ops._template_entries(p, 'audioenc', name)
@@ -272,27 +287,64 @@ def outer_main(udp: Optional[str]):
     return 0
 
 
-def ffmpeg_cmd(kind: str, source: str, bitrate: int, video_bitrate: int = 320, size: str = '320x240',
-               ffmpeg='ffmpeg', he_aac=False) -> List[str]:
-    """ffmpeg producing a CBR MPEG-2 TS whose rate after RS(204,188) equals the subchannel bitrate."""
-    ts_kbps = bitrate * 188 // 204
-    cmd = [ffmpeg, '-hide_banner', '-loglevel', 'warning', '-re', '-i', source]
+def budget(kind: str, bitrate: int, video_bitrate: int = 320, audio_bitrate: Optional[int] = None,
+           he_aac: bool = False, fps: int = 15):
+    """Split the subchannel between audio and video, after the fixed costs of T-DMB packaging.
+
+    After RS(204,188) the TS gets bitrate*188/204. Every access unit becomes its own PES + SL packet
+    (~23 bytes of headers plus on average half a TS packet of stuffing), and PAT/PMT (every 200 ms)
+    and the OD/BIFS carousel (every 500 ms) take their share too. Returns (video_kbps, audio_kbps)."""
+    cap = bitrate * 188 / 204
+    psi = 2 * 188 * 8 * 5 / 1000                 # PAT + PMT, 5 times a second
+    carousel = 2 * 188 * 8 * 2 / 1000            # OD + BIFS, twice a second
+    per_au = (14 + 9 + 94) * 8 / 1000            # PES + SL header + average stuffing, in kbit
+    audio_aus = 48000 / (2048 if he_aac else 1024)
+    fixed = psi + carousel + audio_aus * per_au + (fps * (per_au + 0.04) if kind == 'tv' else 0)
+    usable = (cap - fixed) * (184 / 188) * 0.95  # TS headers, 5 % margin for encoder rate wobble
+    if usable < 24:
+        raise ValueError(f'{bitrate} kbps is too small for a T-DMB {kind} service')
     if kind == 'tv':
-        a_kbps = 64 if he_aac else 96
-        video_bitrate = min(video_bitrate, int(ts_kbps * 0.8) - a_kbps)
-        cmd += ['-map', '0:v:0', '-map', '0:a:0', '-c:v', 'libx264', '-profile:v', 'baseline', '-level', '1.3',
-                '-s', size, '-r', '15', '-b:v', f'{video_bitrate}k', '-maxrate', f'{video_bitrate}k',
-                '-bufsize', f'{video_bitrate}k', '-g', '30', '-x264-params', 'nal-hrd=cbr']
+        a = int(audio_bitrate or (48 if he_aac else 64))
+        v = int(min(video_bitrate, (usable - a) * 0.9))   # x264 overshoots its target a little
+        if v < 64:
+            raise ValueError(f'{bitrate} kbps leaves only {v} kbps for video; use a bigger subchannel')
+        return v, a
+    a = int(min(audio_bitrate or 192, usable))
+    return 0, a // 8 * 8
+
+
+LIVE_DEVICES = {'v4l2', 'video4linux2', 'alsa', 'pulse', 'jack', 'decklink', 'x11grab', 'kmsgrab', 'fbdev',
+                'avfoundation', 'dshow', 'gdigrab', 'openal', 'oss', 'sndio'}
+
+
+def ffmpeg_cmd(kind: str, source: str, bitrate: int, video_bitrate: int = 320, size: str = '320x240',
+               ffmpeg='ffmpeg', he_aac=False, input_format: str = '', input_opts: str = '', fps: int = 15,
+               audio_bitrate: Optional[int] = None, realtime: bool = True) -> List[str]:
+    """ffmpeg reads *anything it can open* (files, http/hls/rtmp/srt streams, v4l2/decklink/alsa/pulse
+    devices, lavfi test sources...) and writes a plain MPEG-TS that tdmb.TDMBMux turns into T-DMB."""
+    v_kbps, a_kbps = budget(kind, bitrate, video_bitrate, audio_bitrate, he_aac, fps)
+    cmd = [ffmpeg, '-hide_banner', '-loglevel', 'warning']
+    if input_opts:
+        cmd += shlex.split(input_opts)
+    if realtime and input_format not in LIVE_DEVICES:
+        cmd += ['-re']                       # files, streams, test sources: real-time speed (devices pace themselves)
+    if input_format:
+        cmd += ['-f', input_format]
+    cmd += ['-i', source]
+    if kind == 'tv':
+        cmd += ['-map', '0:v:0', '-map', '0:a:0?',
+                '-c:v', 'libx264', '-profile:v', 'baseline', '-level', '1.3', '-pix_fmt', 'yuv420p',
+                '-vf', f'scale={size.replace("x", ":")}:force_original_aspect_ratio=decrease,'
+                       f'pad={size.replace("x", ":")}:(ow-iw)/2:(oh-ih)/2,setsar=1',
+                '-r', str(fps), '-bf', '0', '-g', str(fps * 2), '-tune', 'zerolatency',
+                '-b:v', f'{v_kbps}k', '-maxrate', f'{v_kbps}k', '-bufsize', f'{v_kbps}k']
     else:
-        # leave ~25% for TS/PES/PSI overhead so the CBR mux never overflows
-        a_kbps = max(32, min(int(ts_kbps * 0.75) // 8 * 8, 192))
         cmd += ['-map', '0:a:0', '-vn']
     if he_aac:
-        cmd += ['-c:a', 'libfdk_aac', '-profile:a', 'aac_he_v2' if a_kbps <= 64 else 'aac_he']
+        cmd += ['-c:a', 'libfdk_aac', '-profile:a', 'aac_he_v2' if a_kbps <= 48 else 'aac_he']
     else:
         cmd += ['-c:a', 'aac']
-    cmd += ['-b:a', f'{a_kbps}k', '-ar', '48000', '-ac', '2',
-            '-f', 'mpegts', '-muxrate', f'{ts_kbps}k', '-mpegts_flags', 'system_b', 'pipe:1']
+    cmd += ['-b:a', f'{a_kbps}k', '-ar', '48000', '-ac', '2', '-f', 'mpegts', 'pipe:1']
     return cmd
 
 
@@ -303,28 +355,37 @@ class Pacer:
     """Emit exactly bitrate*3 coded bytes per 24 ms frame; fill gaps with null TS packets so the
     interleaved stream is never interrupted (a gap would corrupt 12 x 17 bytes of history)."""
 
-    def __init__(self, bitrate: int):
+    MAX_QUEUE = 2000          # TS packets (~2-6 s depending on bitrate)
+
+    def __init__(self, bitrate: int, block: bool = False):
         self.frame = bitrate * 3
         self.coder = OuterCoder()
         self.queue = collections.deque()
         self.pending = b''
         self.nulls = 0
+        self.block = block
+        self.cond = threading.Condition()
 
     def put_ts(self, data: bytes):
-        self.queue.append(data)
-        # don't let a stalled consumer build up seconds of latency
-        while len(self.queue) > 4000:
-            self.queue.popleft()
+        with self.cond:
+            if self.block:
+                # back-pressure: a source faster than real time (file, test pattern) simply waits;
+                # dropping packets would break PES/SL packets and the interleaver history
+                while len(self.queue) >= self.MAX_QUEUE:
+                    self.cond.wait(0.5)
+            self.queue.append(data)
 
     def next_frame(self) -> bytes:
-        while len(self.pending) < self.frame:
-            if self.queue:
-                pkt = self.queue.popleft()
-            else:
-                pkt = NULL_TS
-                self.nulls += 1
-            self.pending += self.coder.feed(pkt)
-        out, self.pending = self.pending[:self.frame], self.pending[self.frame:]
+        with self.cond:
+            while len(self.pending) < self.frame:
+                if self.queue:
+                    pkt = self.queue.popleft()
+                else:
+                    pkt = NULL_TS
+                    self.nulls += 1
+                self.pending += self.coder.feed(pkt)
+            out, self.pending = self.pending[:self.frame], self.pending[self.frame:]
+            self.cond.notify_all()
         return out
 
 
@@ -338,13 +399,24 @@ def encode_main(argv: List[str]):
     ap.add_argument('--source', required=True)
     ap.add_argument('--video-bitrate', type=int, default=320)
     ap.add_argument('--size', default='320x240')
+    ap.add_argument('--fps', type=int, default=15)
+    ap.add_argument('--audio-bitrate', type=int)
+    ap.add_argument('--input-format', default='')
+    ap.add_argument('--input-opts', default='')
+    ap.add_argument('--plain-ts', action='store_true', help='skip MPEG-4 Systems (T-DMB) packaging')
     ap.add_argument('--ffmpeg', default='ffmpeg')
     a = ap.parse_args(argv)
     if not a.fifo and not a.udp:
         ap.error('--fifo or --udp is required')
     caps = capabilities.detect({})
     he = bool((caps.get('ffmpeg') or {}).get('he_aac'))
-    cmd = ffmpeg_cmd(a.kind, a.source, a.bitrate, a.video_bitrate, a.size, a.ffmpeg, he)
+    cmd = ffmpeg_cmd(a.kind, a.source, a.bitrate, a.video_bitrate, a.size, a.ffmpeg, he,
+                     a.input_format, a.input_opts, a.fps, a.audio_bitrate)
+    v_kbps, a_kbps = budget(a.kind, a.bitrate, a.video_bitrate, a.audio_bitrate, he, a.fps)
+    from .tdmb import TSDemux, TDMBMux
+    w, h = (int(x) for x in a.size.split('x'))
+    demux = None if a.plain_ts else TSDemux()
+    mux = None if a.plain_ts else TDMBMux(a.kind == 'tv', w, h, v_kbps * 1000, a_kbps * 1000)
     print('running: ' + ' '.join(shlex.quote(x) for x in cmd), file=sys.stderr)
     if a.fifo:
         if not os.path.exists(a.fifo):
@@ -357,7 +429,7 @@ def encode_main(argv: List[str]):
         dest = (h or '127.0.0.1', int(port))
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         send = lambda b: sock.sendto(b, dest)
-    pacer = Pacer(a.bitrate)
+    pacer = Pacer(a.bitrate, block=True)
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
     done = threading.Event()
 
@@ -367,6 +439,11 @@ def encode_main(argv: List[str]):
             data = proc.stdout.read(188 * 8)
             if not data:
                 break
+            if demux is not None:
+                for item in demux.feed(data):
+                    for pkt in mux.add(*item):
+                        pacer.put_ts(pkt)
+                continue
             buf += data
             n = len(buf) // 188 * 188
             for i in range(0, n, 188):

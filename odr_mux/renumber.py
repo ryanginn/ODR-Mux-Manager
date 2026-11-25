@@ -35,7 +35,7 @@ def _uid_parts(uid):
     return m.group('pre'), int(m.group('num')), len(m.group('num')), m.group('suf')
 
 
-def plan(p: Project, order: List[str], remove: List[str] = (), mode: str = 'renumber') -> dict:
+def plan(p: Project, order: List[str], remove: List[str] = (), mode: str = 'keep') -> dict:
     """Compute the change plan without touching the project."""
     stations = [s for s in p.stations() if s['kind'] in ('audio', 'dmb')]
     by_id = {s['id']: s for s in stations}
@@ -172,7 +172,7 @@ def _linksets_for(p: Project, svc_uid):
 
 
 # ------------------------------------------------------------------ apply to project
-def apply(p: Project, order: List[str], remove: List[str] = (), mode: str = 'renumber',
+def apply(p: Project, order: List[str], remove: List[str] = (), mode: str = 'keep',
           archive_stamp: Optional[str] = None) -> dict:
     pl = plan(p, order, remove, mode)
     stations = {s['id']: s for s in p.stations()}

@@ -237,7 +237,7 @@ against real supervisord, odr-dabmux v5.5.1, odr-audioenc v3.6.0 and odr-padenc 
 | 5. Linking, FI, announcements, user apps | ✅ |
 | 6. Data services (SPI, Journaline, TPEG, …) | ✅ |
 | 7. On-air decoding (EDI) | ✅ DLS + MOT slides for DAB+ and MP2, from real mux output |
-| 8. DMB | ✅ outer coder byte-exact vs odr-dabmux; stream recovered from the mux output and decoded |
+| 8. DMB | ✅ T-DMB (IOD/OD/BIFS/SL) from any ffmpeg input; recovered from the mux output and decoded with GPAC |
 
 Findings along the way:
 
@@ -247,11 +247,14 @@ Findings along the way:
 - **X-PAD continuation length.** An X-PAD without a CI list continues the previous application
   with the length of the whole previous X-PAD (CI bytes included).
 
+## Decisions (from review)
+
+- Removing or reordering stations **keeps the numbers by default**; closing the gap is opt-in.
+- Audio levels keep coming from the odr-dabmux management port (stats sockets stay optional).
+- Full T-DMB packaging is built, with ffmpeg as the input for video and audio.
+- The odr-dabmux UDP bug won't be reported upstream; the FIFO workaround stays.
+
 ## Open questions
 
-- Should removing a station close the number gap (10→9, port 9010→9009), or only change the
-  display order? Built: close the gap by default, with a "keep numbers" option.
-- Is anything else already listening on the `/var/tmp/P##.stats` sockets? Levels come from the
-  dabmux management port by default, so this only matters if "stats" is chosen in Settings.
-- DMB: is full T-DMB MPEG-4 Systems packaging (SL/IOD/BIFS, TS 102 428) needed? It isn't built yet.
-  Today it is plain H.264/AAC in MPEG-2 TS.
+- HE-AAC for DMB needs an ffmpeg built with libfdk_aac. Should the installer offer to build one?
+- T-DMB receiver testing on real hardware (car radios, phones with T-DMB) still has to be done.
