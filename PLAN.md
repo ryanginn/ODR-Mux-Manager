@@ -103,8 +103,54 @@ uses the same stack and look.
 7. **Data services.** SPI, Journaline and TPEG as packet or enhanced-packet subchannels
    with a `.dat` file input. Bitrate, packet size and address are checked against each
    other.
-8. **DMB.** Subchannel type `dmb`, shown only if the installed odr-dabmux supports it.
+   - The current odr-dabmux `userapp` names are only `slideshow`, `spi`, `website` and
+     `journaline`.
+   - TPEG (and DMB) therefore need the older single-app `figtype` key. The editor writes
+     whichever form is needed.
+8. **DMB (experimental, last phase).** See the DMB section below.
 9. **Settings, users, backups/history, audit log.**
+
+## DMB
+
+What current ODR-DabMux does (checked against the latest source, June 2026):
+
+- It still accepts `type dmb` subchannels.
+- It treats them as **raw stream-mode data** (input from `udp`, `file` or `fifo`).
+- The old Reed-Solomon (204,188) + outer interleaver stage is "unported": dabmux logs a
+  warning and passes the bytes through unchanged.
+
+So "is DMB supported?" isn't a simple yes/no.
+
+- **The manager does the DMB outer coding itself** (TS → RS(204,188) → interleaver), so
+  it works with a stock odr-dabmux.
+- **The DMB setup page tells you which situation you're in:**
+  - dabmux version found
+  - whether `dmb` is accepted
+  - whether the outer coding is handled by dabmux or by the manager
+- **If anything is missing, the page shows step-by-step instructions:** build or upgrade
+  odr-dabmux, install the ffmpeg codecs, and add the supervisor programs.
+
+### DMB encoders (DMB Radio and DMB TV)
+
+These are created and managed like the existing encoder pairs: supervisor programs,
+editable in the UI, and shown on the monitor with levels and status.
+
+1. **Source → ffmpeg:**
+   - DMB TV: H.264 Baseline video (QVGA/CIF) plus HE-AAC v2 audio
+   - DMB Radio: audio only
+2. **`odr-mux-manager dmb-mux` (new):** builds the T-DMB MPEG-2 TS to ETSI TS 102 428, with
+   the MPEG-4 SL packetisation, IOD and OD/BIFS that ffmpeg can't produce. Optionally adds
+   slideshow / DLS-style text.
+3. **Outer coding:** RS(204,188) + interleaver, then UDP to dabmux (`type dmb`,
+   `inputproto udp`).
+4. **Signalling:** the component gets DSCTy MPEG-2 TS and user app type DMB.
+
+Capacity: DMB TV needs roughly 300–550 kbps (≈ 200–400 CU), and DMB Radio roughly 96–192
+kbps. The current mux has 1 CU free, so the CU bar and checker will say exactly what would
+have to give.
+
+Testing risk: few receivers outside Korea decode T-DMB. The first milestone is a stream
+that a software decoder accepts, using a test receiver that we'll pick when we get there.
 
 ## Checker (examples from the current mux)
 
@@ -124,8 +170,9 @@ uses the same stack and look.
 3. Service, subchannel, component and encoder editors, plus the checker and Apply/rollback.
 4. Remove/reorder with renumbering, MOT moves and the impact report.
 5. Linking, FI, announcements, user apps.
-6. Data services and DMB.
+6. Data services (SPI, Journaline, TPEG).
 7. On-air decoding from dabmux's EDI/ZMQ output, to show what is actually transmitted.
+8. DMB: support check and instructions page, then the outer coder, the DMB Radio encoder, and the DMB TV encoder.
 
 ## Open questions
 
