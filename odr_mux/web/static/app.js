@@ -1423,8 +1423,24 @@ async function dataEditor(s) {
     field(".dat file written by the generator", h("div", { class: "row" }, file, isAdmin() && !ro ? pick : null)),
     h("div", { class: "grid-2" }, field("Bitrate (kbps)", bitrate), field("Subchannel type", subtype)), prot.el,
     h("div", { class: "grid-3" }, field("Packet address", addr, { hint: "Must match the generator." }), field("DSCTy (component type)", dscty, { hint: "60 = MOT, 5 = TDC. Blank = preset." }), h("div", { class: "field" }, h("label", null, " "), dg.el)),
-    field("User applications (FIG 0/13)", uap.el), field("figtype (only for apps without a name, e.g. TPEG 0x4)", fig), attachField);
+    field("User applications (FIG 0/13)", uap.el), field("figtype (only for apps without a name, e.g. TPEG 0x4)", fig), attachField, datOut);
+  const datOut = h("div");
   const foot = [btn("Close", { onclick: () => m.close() })];
+  if (s) foot.unshift(btn("Check the .dat file", { cls: "ghost", icon: "search", onclick: async () => {
+    put(clear(datOut), h("div", { class: "banner blue" }, h("span", { class: "spin" }), "Reading the file…"));
+    try {
+      const r = await api("GET", `/api/data-services/${encodeURIComponent(s.id)}/inspect`);
+      put(clear(datOut), h("div", { class: "card card-pad stack tight" },
+        h("div", { class: "banner " + (r.ok ? "green" : "amber") }, icon(r.ok ? "check" : "alert"),
+          h("div", { class: "grow" }, r.ok ? "The file looks right: packets on the configured address." : r.problems.map((x) => h("div", null, x)))),
+        r.exists ? h("dl", { class: "kv" },
+          h("dt", null, "Packet addresses in the file"), h("dd", { class: "mono" }, Object.entries(r.addresses || {}).map(([a, n]) => `${a} (${n})`).join(", ") || "none"),
+          h("dt", null, "Packets read"), h("dd", null, `${r.packets} (${r.padding} padding, ${r.crc_errors} CRC errors, ${r.data_groups} data groups)`),
+          h("dt", null, "Packet sizes"), h("dd", { class: "mono" }, Object.entries(r.packet_sizes || {}).map(([k, n]) => `${k} bytes × ${n}`).join(", ")),
+          h("dt", null, "Last written"), h("dd", null, fmtAgo(r.mtime))) : null));
+      datOut.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    } catch (e) { clear(datOut); }
+  } }));
   if (!ro && s) foot.unshift(btn("Remove", { cls: "danger ghost", icon: "trash", onclick: async () => {
     if (!(await confirmDialog(`Remove ${s.label}? Its subchannel frees ${s.cu} CU.`, { danger: true, okText: "Remove" }))) return;
     await api("DELETE", `/api/stations/${encodeURIComponent(s.id)}`); m.close(); pokeStatus(); route();

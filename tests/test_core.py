@@ -422,3 +422,26 @@ def test_attach_journaline_to_stations():
     renumber.apply(p, ids, remove=[p.station('2491')['id']])                 # remove MPB Radio 1 (srv-01)
     assert dataservices.attached_services(p, key) == ['srv-04']
     assert not [i for i in checker.check(p) if i['code'] == 'comp-ref']
+
+
+def _packet(address, payload=b'', first=True, last=True):
+    from odr_mux.datfile import _crc16
+    size = 24
+    body = payload[:size - 5].ljust(size - 5, b'\x00')
+    hdr = bytes([(0 << 6) | ((2 if first else 0) | (1 if last else 0)) << 2 | (address >> 8), address & 0xFF,
+                 len(payload[:size - 5])])
+    pkt = hdr + body
+    c = _crc16(pkt)
+    return pkt + bytes([c >> 8, c & 0xFF])
+
+
+def test_dat_inspector_finds_address_mismatch(tmp_path):
+    from odr_mux.datfile import inspect
+    f = tmp_path / 'j.dat'
+    f.write_bytes(b''.join(_packet(0x3E8, b'journaline data') for _ in range(10)) + _packet(0))
+    r = inspect(str(f), '0x1')
+    assert r['addresses'] == {'0x3E8': 10} and r['padding'] == 1 and r['crc_errors'] == 0
+    assert not r['ok'] and 'configured for 0x1' in r['problems'][0]
+    assert inspect(str(f), '0x3E8')['ok']
+    f.write_bytes(b'not packets at all' * 50)
+    assert not inspect(str(f), '0x1')['ok']

@@ -103,6 +103,15 @@ def check(project: Project, check_fs: bool = False, manager_port: int | None = N
             f = sc.get('inputuri') or ''
             if f and not Path(f).exists():
                 out.append(_issue('warning', 'data-file', f'{sc.key}: input file {f} does not exist (yet).', subchannel=sc.key))
+            elif f and stype in ('packet', 'enhancedpacket'):
+                from .datfile import inspect
+                comp = next((c for c in project.components() if c.get('subchannel') == sc.key and c.get('address')), None)
+                try:
+                    r = inspect(f, comp.get('address') if comp else None, limit=64 * 1024)
+                    for msg in r.get('problems', []):
+                        out.append(_issue('warning', 'data-file', f'{sc.key}: {msg}', subchannel=sc.key))
+                except OSError:
+                    pass
     eff = project.effective_subch_ids()
     seen = {}
     for uid, i in eff.items():
