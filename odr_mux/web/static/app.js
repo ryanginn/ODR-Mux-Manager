@@ -1393,8 +1393,10 @@ async function dataEditor(s) {
         btn("All", { cls: "sm ghost", onclick: () => attachBoxes.forEach(([, t]) => { t.box.checked = true; }) }),
         btn("None", { cls: "sm ghost", onclick: () => attachBoxes.forEach(([, t]) => { t.box.checked = false; }) }))),
     h("div", { class: "list-check" }, attachBoxes.length ? attachBoxes.map(([, t]) => t.el) : h("span", { class: "muted small" }, "No audio stations.")),
-    h("div", { class: "hint" }, "Each ticked station gets this service as an extra component on the same packet address, so receivers playing that station offer it (e.g. Journaline news while the station plays)."));
+    h("div", { class: "hint" }, "Each ticked station gets this service as an extra component on the same packet address, so receivers playing that station offer it (e.g. Journaline news while the station plays)."),
+    h("div", { class: "banner amber" }, icon("alert"), h("div", { class: "grow" }, "odr-dabmux can't share one component between services, so each station gets its own copy pointing at the same packet address. Some receivers then only fill the standalone service and leave the copies empty - test on your receivers before relying on it.")));
   const attachedValue = () => attachBoxes.filter(([, t]) => t.box.checked).map(([uid]) => uid);
+  const datOut = h("div");   // .dat check results; must exist before `body` below uses it
   const c = (s && s.component) || {};
   const sc = (s && s.subchannel) || {};
   const svc = (s && s.service) || {};
@@ -1424,7 +1426,6 @@ async function dataEditor(s) {
     h("div", { class: "grid-2" }, field("Bitrate (kbps)", bitrate), field("Subchannel type", subtype)), prot.el,
     h("div", { class: "grid-3" }, field("Packet address", addr, { hint: "Must match the generator." }), field("DSCTy (component type)", dscty, { hint: "60 = MOT, 5 = TDC. Blank = preset." }), h("div", { class: "field" }, h("label", null, " "), dg.el)),
     field("User applications (FIG 0/13)", uap.el), field("figtype (only for apps without a name, e.g. TPEG 0x4)", fig), attachField, datOut);
-  const datOut = h("div");
   const foot = [btn("Close", { onclick: () => m.close() })];
   if (s) foot.unshift(btn("Check the .dat file", { cls: "ghost", icon: "search", onclick: async () => {
     put(clear(datOut), h("div", { class: "banner blue" }, h("span", { class: "spin" }), "Reading the file…"));
