@@ -569,7 +569,11 @@ function route() {
   const parts = (location.hash.replace(/^#\/?/, "") || "monitor").split("/");
   const key = parts[0];
   shellEls.nav.querySelectorAll("a").forEach((a) => a.classList.toggle("active", a.dataset.key === key));
-  const content = clear(shellEls.content);
+  // Each render gets its own container. If a page is rendered again before the previous (async)
+  // render finished - e.g. a save that changes the URL *and* re-routes - the old render writes into
+  // a detached element instead of duplicating everything on screen.
+  const content = h("div", { class: "page" });
+  clear(shellEls.content).appendChild(content);
   const pages = { monitor: pageMonitor, stations: pageStations, ensemble: pageEnsemble, linking: pageLinking, announcements: pageAnnouncements,
     data: pageData, dmb: pageDmb, outputs: pageOutputs, checks: pageChecks, changes: pageChanges, files: pageFiles,
     import: pageImport, users: pageUsers, settings: pageSettings, audit: pageAudit, account: pageAccount };
@@ -991,7 +995,10 @@ async function stationDetail(root, id, tab) {
   const body = h("div");
   const ro = !isEditor();
   const save = async (payload) => {
-    try { const r = await api("PUT", `/api/stations/${encodeURIComponent(id)}`, payload); toast("Saved to the draft. Apply when ready.", "ok"); pokeStatus(); location.hash = `#/stations/${encodeURIComponent(r.id)}/${tab}`; route(); } catch (e) { /* toasted */ }
+    try { const r = await api("PUT", `/api/stations/${encodeURIComponent(id)}`, payload); toast("Saved to the draft. Apply when ready.", "ok"); pokeStatus();
+      const next = `#/stations/${encodeURIComponent(r.id)}/${tab}`;
+      if (location.hash === next) route(); else location.hash = next;   // hashchange re-renders by itself
+    } catch (e) { /* toasted */ }
   };
   const svc = s.service || {};
   const sc = s.subchannel || {};
@@ -1521,6 +1528,7 @@ async function pageChanges(root) {
   };
   const showResult = (r) => {
     const m = modal({ title: r.ok ? "Applied" : "Apply had problems", body: h("div", { class: "stack" }, h("div", { class: "banner " + (r.ok ? "green" : "red") }, icon(r.ok ? "check" : "alert"), r.message),
+      r.warning ? h("div", { class: "banner amber" }, icon("alert"), h("div", { class: "grow" }, r.warning)) : null,
       h("div", { class: "code log" }, (r.log || []).join("\n"))), foot: btn("Close", { cls: "primary", onclick: () => { m.close(); pokeStatus(); route(); } }) });
   };
   put(root, h("div", { class: "page-head" }, h("div", null, h("h1", null, "Changes & history"), h("p", null, "Review what Apply will write, apply it, or roll back."))),
@@ -1656,6 +1664,7 @@ async function pageSettings(root) {
   const restartCmd = f("supervisor_restart_cmd", { class: "mono", placeholder: "sudo -n systemctl restart supervisor" });
   const sudoMode = sel(s.supervisor_sudo || "auto", [["auto", "use sudo supervisorctl when the socket is root-only"], ["always", "always use sudo supervisorctl"], ["never", "never use sudo"]]);
   const run = toggle("Run supervisor / odr-dabmux commands on Apply", s.run_commands);
+  const vdm = toggle("Test-run the new config through odr-dabmux before Apply writes it", s.validate_with_dabmux !== false);
   const levels = sel(s.levels_source, [["dabmux", "odr-dabmux management port (no extra sockets)"], ["stats", "odr-audioenc --stats sockets"], ["both", "Both (encoder sockets when free)"]]);
   const mgmt = f("dabmux_mgmt", { class: "mono", placeholder: "from the mux file" }), onair = f("onair_edi", { class: "mono", placeholder: "auto" });
   const sdb = f("silence_db", { type: "number" }), ssec = f("silence_secs", { type: "number" });
@@ -1680,7 +1689,7 @@ async function pageSettings(root) {
       h("div", { class: "grid-2" }, field("After Apply", reloadMode, { hint: "Restarting the service briefly takes every station off air." }), field("Service restart command", restartCmd)),
       field("Restart odr-dabmux with", restart, { hint: "auto (a supervisor program running odr-dabmux), none, supervisor:<program>, systemd:<unit> or command:<shell command>." }),
       field("Permissions", sudoMode, { hint: "The default supervisor socket is root-only; the installer adds a sudoers rule so the manager can use sudo -n supervisorctl." }),
-      run.el),
+      run.el, vdm.el),
     h("div", { class: "card card-pad stack mt" }, h("h3", null, "Monitoring"),
       h("div", { class: "grid-2" }, field("Audio levels from", levels), field("odr-dabmux management endpoint", mgmt)),
       h("div", { class: "grid-3" }, field("Silence below (dBFS)", sdb), field("…for (seconds)", ssec), field("On-air decoder (EDI output)", onair, { hint: "auto = the mux's EDI TCP output, off, or tcp://host:port." }))),
@@ -1694,7 +1703,7 @@ async function pageSettings(root) {
     h("div", { class: "row mt" }, h("span", { class: "spacer" }), btn("Save settings", { cls: "primary", onclick: async () => {
       try {
         await api("PUT", "/api/settings", { supervisor_socket: sock.value, supervisorctl: ctl.value, supervisor_conf: sconf.value, dabmux_restart: restart.value || "auto", run_commands: run.box.checked,
-          supervisor_reload: reloadMode.value, supervisor_restart_cmd: restartCmd.value || "sudo -n systemctl restart supervisor", supervisor_sudo: sudoMode.value,
+          supervisor_reload: reloadMode.value, validate_with_dabmux: vdm.box.checked, supervisor_restart_cmd: restartCmd.value || "sudo -n systemctl restart supervisor", supervisor_sudo: sudoMode.value,
           levels_source: levels.value, dabmux_mgmt: mgmt.value, onair_edi: onair.value || "auto", silence_db: sdb.value, silence_secs: ssec.value, stats_dir: statsDir.value, encoder_user: encUser.value,
           tool_paths: Object.fromEntries(tools.map(([t, i]) => [t, i.value])) });
         toast("Saved.", "ok");
