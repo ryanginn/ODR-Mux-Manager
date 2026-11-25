@@ -247,7 +247,7 @@ def overview():
            'cu_total': TOTAL_CU, 'cu_used': live.cu_used(), 'cu_draft': draft.cu_used(),
            'stations': [_station_public(s, u) for s in sts]}
     if is_viewer(u):
-        out['cu_segments'] = [{'id': s['id'], 'label': s['label'], 'cu': s['cu'], 'kind': s['kind'],
+        out['cu_segments'] = [{'id': s['id'], 'label': s['label'], 'shortlabel': s.get('shortlabel'), 'cu': s['cu'], 'kind': s['kind'],
                                'codec': s['codec'], 'protection': s['protection'], 'bitrate': s['bitrate']}
                               for s in live.stations()]
         out['cu_segments_draft'] = [{'id': s['id'], 'label': s['label'], 'cu': s['cu'], 'kind': s['kind']}
@@ -566,8 +566,14 @@ def put_section(name):
 @require('editor')
 def add_data_service():
     data = json_body()
-    from ..dataservices import add_data_service as add
-    res = _edit(lambda p: add(p, data), f'add data service {data.get("label")}')
+    from ..dataservices import add_data_service as add, set_attached
+
+    def fn(p):
+        r = add(p, data)
+        if data.get('attached'):
+            set_attached(p, r['station'], data['attached'])
+        return r
+    res = _edit(fn, f'add data service {data.get("label")}')
     return jsonify(ok=True, station=res['station'])
 
 
@@ -575,9 +581,26 @@ def add_data_service():
 @require('editor')
 def put_data_service(sid):
     data = json_body()
-    from ..dataservices import update_data_service as upd
-    _edit(lambda p: upd(p, sid, data), f'edit data service {sid}')
+    from ..dataservices import update_data_service as upd, set_attached
+
+    def fn(p):
+        upd(p, sid, data)
+        if 'attached' in data:
+            set_attached(p, sid, data.get('attached') or [])
+        return []
+    _edit(fn, f'edit data service {sid}')
     return jsonify(ok=True)
+
+
+@bp.get('/api/data-services/<sid>/attached')
+@require('viewer')
+def get_attached(sid):
+    _need_project()
+    from ..dataservices import attached_services
+    try:
+        return jsonify(attached=attached_services(ws().draft(), sid))
+    except ops.OpError as e:
+        raise ApiError(str(e), 404)
 
 
 @bp.delete('/api/stations/<sid>')
@@ -645,10 +668,29 @@ def discard_draft():
     return jsonify(ok=True)
 
 
+@bp.get('/api/apply/progress')
+@require('viewer')
+def apply_progress():
+    pr = dict(ws().progress)
+    pr['now'] = time.time()
+    return jsonify(pr)
+
+
 @bp.post('/api/apply')
 @require('editor')
 def apply():
     _need_project()
+    if ws().progress.get('running'):
+        raise ApiError('An Apply or rollback is already running.', 409)
+    ws().begin('apply')
+    try:
+        return _apply()
+    finally:
+        ws().end()
+
+
+def _apply():
+    ws().step('Checking the config')
     p = ws().draft()
     body = json_body()
     dabmux_note = None
@@ -660,6 +702,7 @@ def apply():
     if cfg().get('validate_with_dabmux', True) and ws().live().texts()['mux'] != p.texts()['mux']:
         from ..validate import check_with_dabmux
         dm = (capabilities.detect(cfg()).get('tools') or {}).get('odr-dabmux')
+        ws().step('Test-running odr-dabmux on the new config')
         v = check_with_dabmux(p.texts()['mux'], dm)
         if v.get('skipped'):
             dabmux_note = v['message']
@@ -714,10 +757,15 @@ def backup_diff(bid):
 @bp.post('/api/backups/<bid>/rollback')
 @require('editor')
 def rollback(bid):
+    if ws().progress.get('running'):
+        raise ApiError('An Apply or rollback is already running.', 409)
+    ws().begin('rollback')
     try:
         res = ws().rollback(bid, current_user()['username'])
     except FileNotFoundError:
         raise ApiError('Backup not found.', 404)
+    finally:
+        ws().end()
     audit('rollback', bid, {'ok': res['ok']})
     return jsonify(res), (200 if res['ok'] else 500)
 

@@ -621,12 +621,37 @@ const pokeStatus = () => refreshStatus();
 
 function codecBadge(c) { return c ? h("span", { class: "codec " + c }, CODEC_LABEL[c] || c) : null; }
 
+// One plain colour per station: picked from its id (so it doesn't change between refreshes) and
+// never the same as the segment next to it.
+const STATION_COLOURS = ["#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#a855f7", "#14b8a6", "#ec4899", "#eab308",
+  "#06b6d4", "#84cc16", "#6366f1", "#f97316", "#10b981", "#e11d48", "#8b5cf6", "#0ea5e9"];
+function hashStr(t) { let x = 2166136261; for (const c of String(t)) { x ^= c.charCodeAt(0); x = Math.imul(x, 16777619); } return x >>> 0; }
+function stationColours(list) {
+  const out = {};
+  let prev = -1;
+  for (const s of list) {
+    let i = hashStr(s.id) % STATION_COLOURS.length;
+    if (i === prev) i = (i + 1) % STATION_COLOURS.length;
+    out[s.id] = STATION_COLOURS[i];
+    prev = i;
+  }
+  return out;
+}
+S.colours = {};
+// the CSP forbids inline style attributes, so set the colour through the CSSOM
+function stDot(id) { const d = h("i", { class: "st-dot" }); d.style.background = S.colours[id] || "var(--border-strong)"; return d; }
+
 function cuBar(total, segs, draftUsed, opts = {}) {
   const used = segs.reduce((a, s) => a + s.cu, 0);
+  const colours = stationColours(segs);
+  Object.assign(S.colours, colours);
   const bar = h("div", { class: "cubar" + (opts.big ? " big" : "") });
   for (const s of segs) {
-    const seg = h("i", { class: "seg " + (s.kind !== "audio" ? s.kind : (s.codec === "mp2" ? "mp2" : "aac")), title: `${s.label}: ${s.cu} CU (${s.bitrate} kbps ${s.protection || ""})` });
+    const data = s.kind !== "audio";
+    const seg = h("i", { class: "seg" + (data ? " data" : ""), title: `${s.label}: ${s.cu} CU (${s.bitrate} kbps ${s.protection || ""})${data ? " · data" : ""}` });
     seg.style.width = (100 * s.cu / total) + "%";
+    seg.style.setProperty("--c", colours[s.id]);
+    if (opts.big && s.cu / total > 0.045) seg.appendChild(h("span", { class: "seg-label" }, s.shortlabel || s.label || ""));
     bar.appendChild(seg);
   }
   if (draftUsed != null && draftUsed !== used) {
@@ -642,9 +667,8 @@ function cuBar(total, segs, draftUsed, opts = {}) {
       h("span", { class: "cu-num" }, h("b", null, used), ` / ${total}`),
       draftUsed != null && draftUsed !== used ? h("span", { class: "chip amber" }, `${draftUsed} after apply`) : null),
     bar,
-    h("div", { class: "row small muted" }, h("span", { class: "lg-key aac" }), "DAB+", h("span", { class: "lg-key mp2" }), "MP2",
-      h("span", { class: "lg-key data" }), "Data", h("span", { class: "lg-key dmb" }), "DMB", h("span", { class: "lg-key pending" }), "Unapplied",
-      h("span", { class: "spacer" }), `${total - used} CU free`));
+    h("div", { class: "row small muted" }, h("span", { class: "lg-key solid" }), "Station", h("span", { class: "lg-key data" }), "Data service",
+      h("span", { class: "lg-key pending" }), "Unapplied", h("span", { class: "spacer" }), `${total - used} CU free`));
 }
 
 function dbToPct(db) { if (db == null) return 0; return Math.max(0, Math.min(100, (db + 60) / 60 * 100)); }
@@ -682,6 +706,7 @@ async function pageMonitor(root, parts) {
   setCrumbs("On air");
   if (!S.configured) return isAdmin() ? pageImport(root) : pageNotConfigured(root);
   let ov = await api("GET", "/api/overview");
+  Object.assign(S.colours, stationColours(ov.cu_segments || ov.stations));
   const head = h("div");
   const grid = h("div", { class: "mon-grid" });
   const search = h("input", { type: "search", placeholder: "Search stations", value: monFilter.q, "aria-label": "Search" });
@@ -753,7 +778,7 @@ function monCard(s) {
   const alerts = h("div", { class: "row wrap tight" });
   const el = h("button", { class: "station-card mon-card", type: "button", onclick: () => monDetail(s, () => last) },
     h("div", { class: "sc-head" },
-      h("div", { class: "titles" }, h("h3", { class: "ellipsis" }, s.label || "(no label)"),
+      h("div", { class: "titles" }, h("h3", { class: "ellipsis" }, stDot(s.id), s.label || "(no label)"),
         h("div", { class: "sub" }, s.kind === "audio" ? [codecBadge(s.codec), ` ${s.bitrate} kbps`, s.protection ? ` · ${s.protection}` : "", s.cu != null ? ` · ${s.cu} CU` : ""] : [h("span", { class: "codec data" }, s.kind.toUpperCase()), ` ${s.bitrate} kbps`])),
       h("span", { class: "pos mono" }, s.ptag || ("#" + s.position))),
     s.kind === "audio" ? h("div", { class: "mon-body" }, h("div", { class: "grow stack tight" }, meters, dls), slide) : h("div", { class: "small muted" }, s.inputuri || ""),
@@ -1349,12 +1374,27 @@ async function pageData(root) {
         h("div", { class: "sc-inset" }, h("div", { class: "desc mono ellipsis" }, s.inputuri || "no file")),
         h("div", { class: "sc-foot" }, h("span", { class: "chip" }, `SId ${s.id}`), h("span", { class: "chip" }, `address ${c.address || "?"}`),
           ua ? h("span", { class: "chip accent" }, [].concat(ua).join(", ")) : c.figtype ? h("span", { class: "chip accent" }, `figtype ${c.figtype}`) : null,
-          String(c.datagroup) === "true" ? h("span", { class: "chip" }, "data groups") : null));
+          String(c.datagroup) === "true" ? h("span", { class: "chip" }, "data groups") : null,
+          (s.secondary_components || []).length ? h("span", { class: "chip blue" }, `under ${(s.secondary_components || []).length} station${(s.secondary_components || []).length === 1 ? "" : "s"}`) : null));
     })) : h("div", { class: "empty" }, h("h3", null, "No data services"), h("p", null, "Add SPI, Journaline or TPEG and point it at the generator's .dat file.")));
 }
 
-function dataEditor(s) {
+async function dataEditor(s) {
   const ro = !isEditor();
+  let all = [], attached = [];
+  try {
+    all = (await api("GET", "/api/stations")).stations.filter((x) => x.kind === "audio" && x.service_uid);
+    if (s) attached = (await api("GET", `/api/data-services/${encodeURIComponent(s.id)}/attached`)).attached;
+  } catch (e) { /* toasted */ }
+  const attachBoxes = all.map((x) => [x.service_uid, toggle(x.label || x.service_uid, attached.includes(x.service_uid), { disabled: ro })]);
+  const attachField = h("div", { class: "field" },
+    h("div", { class: "label-row" }, h("label", null, "Also show under these stations"), h("span", { class: "spacer" }),
+      ro ? null : h("span", { class: "row tight" },
+        btn("All", { cls: "sm ghost", onclick: () => attachBoxes.forEach(([, t]) => { t.box.checked = true; }) }),
+        btn("None", { cls: "sm ghost", onclick: () => attachBoxes.forEach(([, t]) => { t.box.checked = false; }) }))),
+    h("div", { class: "list-check" }, attachBoxes.length ? attachBoxes.map(([, t]) => t.el) : h("span", { class: "muted small" }, "No audio stations.")),
+    h("div", { class: "hint" }, "Each ticked station gets this service as an extra component on the same packet address, so receivers playing that station offer it (e.g. Journaline news while the station plays)."));
+  const attachedValue = () => attachBoxes.filter(([, t]) => t.box.checked).map(([uid]) => uid);
   const c = (s && s.component) || {};
   const sc = (s && s.subchannel) || {};
   const svc = (s && s.service) || {};
@@ -1383,7 +1423,7 @@ function dataEditor(s) {
     field(".dat file written by the generator", h("div", { class: "row" }, file, isAdmin() && !ro ? pick : null)),
     h("div", { class: "grid-2" }, field("Bitrate (kbps)", bitrate), field("Subchannel type", subtype)), prot.el,
     h("div", { class: "grid-3" }, field("Packet address", addr, { hint: "Must match the generator." }), field("DSCTy (component type)", dscty, { hint: "60 = MOT, 5 = TDC. Blank = preset." }), h("div", { class: "field" }, h("label", null, " "), dg.el)),
-    field("User applications (FIG 0/13)", uap.el), field("figtype (only for apps without a name, e.g. TPEG 0x4)", fig));
+    field("User applications (FIG 0/13)", uap.el), field("figtype (only for apps without a name, e.g. TPEG 0x4)", fig), attachField);
   const foot = [btn("Close", { onclick: () => m.close() })];
   if (!ro && s) foot.unshift(btn("Remove", { cls: "danger ghost", icon: "trash", onclick: async () => {
     if (!(await confirmDialog(`Remove ${s.label}? Its subchannel frees ${s.cu} CU.`, { danger: true, okText: "Remove" }))) return;
@@ -1393,10 +1433,12 @@ function dataEditor(s) {
     try {
       if (s) await api("PUT", `/api/data-services/${encodeURIComponent(s.id)}`, { service: { label: label.value, shortlabel: short.value, id: sid.value },
         subchannel: { inputuri: file.value, bitrate: bitrate.value, type: subtype.value, "protection-profile": prot.prof.value, protection: prot.lvl.value },
-        component: { address: addr.value, datagroup: dg.box.checked ? "true" : "false", type: dscty.value, user_apps: uap.value(), figtype: uap.value().length ? "" : fig.value } });
+        component: { address: addr.value, datagroup: dg.box.checked ? "true" : "false", type: dscty.value, user_apps: uap.value(), figtype: uap.value().length ? "" : fig.value },
+        attached: attachedValue() });
       else await api("POST", "/api/data-services", { preset: preset.value, label: label.value, shortlabel: short.value, sid: sid.value, inputuri: file.value, bitrate: parseInt(bitrate.value),
         subtype: subtype.value, profile: prot.prof.value, protection: parseInt(prot.lvl.value), address: addr.value, datagroup: dg.box.checked, type: dscty.value === "" ? undefined : parseInt(dscty.value),
-        userapps: preset.value === "custom" || uap.value().length ? uap.value() : undefined, figtype: fig.value || undefined });
+        userapps: preset.value === "custom" || uap.value().length ? uap.value() : undefined, figtype: fig.value || undefined,
+        attached: attachedValue() });
       toast("Saved to the draft.", "ok"); m.close(); pokeStatus(); route();
     } catch (e) { /* toasted */ }
   } }));
@@ -1501,6 +1543,39 @@ async function pageChecks(root) {
 
 /* ============================== changes / apply / history ============================== */
 
+// Shows live progress of an Apply/rollback while `promise` runs. Returns the promise's result.
+async function withProgress(title, promise) {
+  const stepsEl = h("div", { class: "steps-list" });
+  const clock = h("span", { class: "muted mono" }, "0s");
+  const body = h("div", { class: "stack" },
+    h("div", { class: "row" }, h("span", { class: "spin" }), h("b", { class: "grow" }, "Working…"), clock),
+    stepsEl, h("p", { class: "small muted" }, "Keep this page open. The mux keeps running while the files are written; with a full supervisor restart every station drops for a few seconds."));
+  const back = h("div", { class: "modal-back" });
+  back.appendChild(h("div", { class: "modal", role: "dialog", "aria-modal": "true" }, h("div", { class: "modal-head" }, h("h2", null, title)), h("div", { class: "modal-body" }, body)));
+  document.body.appendChild(back);
+  const t0 = Date.now();
+  let stop = false;
+  const tick = async () => {
+    if (stop) return;
+    clock.textContent = `${Math.round((Date.now() - t0) / 1000)}s`;
+    try {
+      const pr = await api("GET", "/api/apply/progress", undefined, { quiet: true });
+      if (pr.started && pr.steps) {
+        clear(stepsEl);
+        pr.steps.forEach((st, i) => {
+          const last = i === pr.steps.length - 1 && pr.running;
+          stepsEl.appendChild(h("div", { class: "step-row" + (last ? " active" : "") },
+            last ? h("span", { class: "spin" }) : icon("check"), h("span", { class: "grow" }, st.text),
+            h("span", { class: "muted mono small" }, last ? `${Math.round(pr.now - st.ts)}s` : (st.secs != null ? `${st.secs}s` : ""))));
+        });
+      }
+    } catch (e) { /* the server may be busy restarting things */ }
+    if (!stop) setTimeout(tick, 700);
+  };
+  tick();
+  try { return await promise; } finally { stop = true; back.remove(); }
+}
+
 async function pageChanges(root) {
   setCrumbs("Changes & history");
   const [d, b] = await Promise.all([api("GET", "/api/draft"), api("GET", "/api/backups")]);
@@ -1508,7 +1583,7 @@ async function pageChanges(root) {
   const fsOps = (d.fs || []).filter((o) => o.op !== "stop_program");
   const apply = async (force = false) => {
     try {
-      const r = await api("POST", "/api/apply", { force }, { quiet: true });
+      const r = await withProgress("Applying", api("POST", "/api/apply", { force }, { quiet: true }));
       showResult(r);
     } catch (e) {
       if (e.status === 409) {
@@ -1546,7 +1621,7 @@ async function pageChanges(root) {
       h("tbody", null, b.backups.length ? b.backups.map((x) => h("tr", null, h("td", null, fmtDate(x.ts)), h("td", null, x.user || ""), h("td", { class: "small mono" }, x.files.map((f) => f.split("/").pop()).join(", "),
         x.rolled_back ? h("span", { class: "chip amber" }, "rolled back") : null),
         h("td", { class: "nowrap" }, btn("Compare", { cls: "sm ghost", onclick: async () => { const r = await api("GET", `/api/backups/${x.id}/diff`); modal({ title: `Now vs backup ${x.id}`, wide: true, body: r.files.length ? h("div", { class: "stack" }, r.files.map((f) => h("details", { open: true }, h("summary", { class: "mono" }, f.path), diffView(f.diff)))) : h("p", null, "Identical to the current files.") }); } }),
-          isEditor() ? btn("Roll back", { cls: "sm danger ghost", onclick: async () => { if (await confirmDialog(`Restore the files as they were before ${fmtDate(x.ts)}? Folder moves made by that apply are undone too, and supervisor/odr-dabmux are reloaded.`, { danger: true, okText: "Roll back" })) { const r = await api("POST", `/api/backups/${x.id}/rollback`, {}); showResult(r); } } }) : null))) :
+          isEditor() ? btn("Roll back", { cls: "sm danger ghost", onclick: async () => { if (await confirmDialog(`Restore the files as they were before ${fmtDate(x.ts)}? Folder moves made by that apply are undone too, and supervisor/odr-dabmux are reloaded.`, { danger: true, okText: "Roll back" })) { const r = await withProgress("Rolling back", api("POST", `/api/backups/${x.id}/rollback`, {})); showResult(r); } } }) : null))) :
         h("tr", null, h("td", { colspan: 4, class: "muted" }, "No backups yet. One is made on every Apply.")))))));
 }
 

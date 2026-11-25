@@ -397,3 +397,28 @@ def test_auto_subchannel_id_is_taken_into_account():
     checker.apply_fix(p, 'fix-subch-ids')
     assert not [i for i in checker.check(p) if i['code'] == 'subch-id-dup']
     assert p.subchannel('sub-spi').get('id') == '17'
+
+
+def test_attach_journaline_to_stations():
+    p = Project.load(MPBNL)
+    r = dataservices.add_data_service(p, {'preset': 'journaline', 'label': 'Nuacht', 'sid': '0xE322234A',
+                                          'inputuri': '/x/j.dat'})
+    key = r['station']
+    dataservices.set_attached(p, key, ['srv-01', 'srv-02', 'srv-04'])
+    assert sorted(dataservices.attached_services(p, key)) == ['srv-01', 'srv-02', 'srv-04']
+    sub = p.station(key)['subchannel_uid']
+    extra = [c for c in p.components() if c.get('subchannel') == sub and c.get('service') == 'srv-02']
+    assert len(extra) == 1
+    c = extra[0]
+    assert (c.get('type'), c.get('address'), c.get('datagroup')) == ('5', '0x1', 'true')
+    assert c.find('user-applications').get('userapp') == 'journaline'
+    # placed after every primary component
+    keys = [x.key for x in p.components()]
+    assert keys.index(c.key) > keys.index('comp-02')
+    # detach one; removing an attached station drops its component too
+    dataservices.set_attached(p, key, ['srv-01', 'srv-04'])
+    assert sorted(dataservices.attached_services(p, key)) == ['srv-01', 'srv-04']
+    ids = [s['id'] for s in p.stations() if s['kind'] == 'audio']
+    renumber.apply(p, ids, remove=[p.station('2491')['id']])                 # remove MPB Radio 1 (srv-01)
+    assert dataservices.attached_services(p, key) == ['srv-04']
+    assert not [i for i in checker.check(p) if i['code'] == 'comp-ref']

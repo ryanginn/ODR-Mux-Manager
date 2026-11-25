@@ -149,3 +149,70 @@ def _free(uid, existing):
     while f'{uid}{i}' in existing:
         i += 1
     return f'{uid}{i}'
+
+
+# ------------------------------------------------------------------ attach to audio stations
+def attached_services(p: Project, key) -> list:
+    """Audio service uids that carry this data service as an extra (secondary) component."""
+    st = p.station(key)
+    if not st or st['kind'] != 'data':
+        raise ops.OpError('Data service not found.')
+    return [c.get('service') for c in p.components()
+            if c.get('subchannel') == st['subchannel_uid'] and c.key != st['component_uid'] and c.get('service')]
+
+
+def set_attached(p: Project, key, service_uids: list):
+    """Show a packet data service (e.g. Journaline) under these audio stations too.
+
+    Each station gets a secondary component on the data subchannel with the same packet address,
+    DSCTy, data-group mode and user application as the data service's own component, so a receiver
+    tuned to the station offers the Journaline/SPI/... content. odr-dabmux gives each component its
+    own SCId; several components may share the packet address.
+    """
+    st = p.station(key)
+    if not st or st['kind'] != 'data':
+        raise ops.OpError('Data service not found.')
+    prim = p.component(st['component_uid']) if st['component_uid'] else None
+    if prim is None:
+        raise ops.OpError('The data service has no component to copy.')
+    want = []
+    for uid in service_uids or []:
+        if not p.service(uid):
+            raise ops.OpError(f'Unknown service {uid}.')
+        if uid == st['service_uid']:
+            continue
+        if uid not in want:
+            want.append(uid)
+    comps = p.sec('components', create=True)
+    existing = {c.get('service'): c for c in p.components()
+                if c.get('subchannel') == st['subchannel_uid'] and c.key != prim.key}
+    for svc, c in existing.items():
+        if svc not in want:
+            comps.remove(c)
+    svc_node = p.service(st['service_uid']) if st['service_uid'] else None
+    base = prim.key[5:] if prim.key.startswith('comp-') else prim.key
+    for svc in want:
+        if svc in existing:
+            continue
+        suffix = svc[4:] if svc.startswith('srv-') else svc
+        uid = _free(f'comp-{base}-{suffix}', [c.key for c in p.components()])
+        c = Node(uid, None, [])
+        if svc_node is not None and svc_node.get('label'):
+            _q(c, 'label', svc_node.get('label'))
+            if svc_node.get('shortlabel'):
+                _q(c, 'shortlabel', svc_node.get('shortlabel'))
+        for k in ('type', 'figtype'):
+            if prim.get(k) is not None:
+                c.append(Node(k, prim.get(k)))
+        c.append(Node('service', svc))
+        c.append(Node('subchannel', st['subchannel_uid']))
+        ua = prim.child('user-applications')
+        if ua is not None and ua.children:
+            ops.set_user_apps(c, [x.value for x in ua.children if x.key == 'userapp'])
+        for k in ('address', 'datagroup'):
+            if prim.get(k) is not None:
+                c.append(Node(k, prim.get(k)))
+        # secondary components must come after the service's primary component (SCIdS > 0):
+        # appending at the end of the components section guarantees that
+        comps.append(c)
+    return []

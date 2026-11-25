@@ -36,6 +36,8 @@ class Workspace:
     def __init__(self, cfg: dict):
         self.cfg = cfg
         self.lock = threading.RLock()
+        # live progress of a running Apply/rollback, polled by the UI
+        self.progress = {'running': False, 'step': '', 'started': None, 'steps': []}
         self.state_dir = Path(cfg['state_dir'])
         self.draft_path = self.state_dir / 'draft.json'
         self.backup_dir = self.state_dir / 'backups'
@@ -147,6 +149,21 @@ class Workspace:
         return out
 
     # ---------------------------------------------------------------- apply
+    def step(self, text: str):
+        now = time.time()
+        if self.progress['steps']:
+            self.progress['steps'][-1]['secs'] = round(now - self.progress['steps'][-1]['ts'], 1)
+        self.progress['steps'].append({'text': text, 'ts': now})
+        self.progress['step'] = text
+
+    def begin(self, what: str):
+        self.progress = {'running': True, 'what': what, 'step': '', 'started': time.time(), 'steps': []}
+
+    def end(self):
+        self.step('Done')
+        self.progress['running'] = False
+        self.progress['finished'] = time.time()
+
     def apply(self, user: str = '', dry_run: bool = False) -> dict:
         with self.lock:
             if self._draft is None:
@@ -162,6 +179,7 @@ class Workspace:
                 bdir = self.backup_dir / f'{stamp}-{n}'
             log = []
             # 1. backup
+            self.step('Taking a backup')
             bdir.mkdir(parents=True)
             manifest = {'ts': time.time(), 'user': user, 'files': {}, 'fs': self._draft.get('fs', []),
                         'undo': []}
@@ -178,6 +196,8 @@ class Workspace:
             if dry_run:
                 return {'ok': True, 'backup': bdir.name, 'log': log, 'dry_run': True}
             # 2. filesystem ops (folders), recording undo steps
+            if self._draft.get('fs'):
+                self.step('Creating / moving folders')
             try:
                 for op in self._draft.get('fs', []):
                     log += run_fs_op(op, manifest['undo'])
@@ -186,6 +206,7 @@ class Workspace:
                 (bdir / 'manifest.json').write_text(json.dumps(manifest, indent=1))
                 return {'ok': False, 'message': f'Folder changes failed and were undone: {e}', 'log': log}
             # 3. write files
+            self.step('Writing the config files')
             written = []
             for path, (old, new) in files.items():
                 if old == new:
@@ -220,14 +241,17 @@ class Workspace:
             # restart the whole supervisor service: every encoder (and odr-dabmux, if supervisor runs it)
             # starts fresh with the new config
             if sup_changed or mux_changed:
+                self.step('Restarting the supervisor service: every encoder and odr-dabmux restarts, this can take a minute')
                 log += self.supervisor().restart_service()
                 p = live or self.live()
                 if mux_changed and p.dabmux_program() is None:
                     log += self.restart_dabmux(p)
             return log
         if sup_changed:
+            self.step('Reloading supervisor: changed encoders restart')
             log += self.supervisor().update()
         if mux_changed:
+            self.step('Restarting odr-dabmux')
             log += self.restart_dabmux(live)
         return log
 
@@ -280,6 +304,7 @@ class Workspace:
                 raise FileNotFoundError('no such backup')
             man = json.loads((bdir / 'manifest.json').read_text())
             log = []
+            self.step('Restoring files and folders')
             live_before = self.live().texts() if self.configured else None
             undo(man.get('undo', []), log)
             for path, info in man['files'].items():
