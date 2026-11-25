@@ -22,10 +22,10 @@ test = ["pytest"]
 odr-mux-manager = "odr_mux.__main__:main"
 
 [tool.setuptools]
-packages = ["odr_mux", "odr_mux.web"]
+packages = ["odr_mux", "odr_mux.web", "odr_mux.web.static"]
 
 [tool.setuptools.dynamic]
 version = { attr = "odr_mux.__version__" }
 
 [tool.setuptools.package-data]
-"odr_mux.web" = ["static/*"]
+"odr_mux.web.static" = ["*"]
