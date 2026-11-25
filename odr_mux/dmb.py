@@ -183,8 +183,11 @@ def support(cfg: dict) -> dict:
     elif not ff.get('h264'):
         instr.append({'title': 'Get an ffmpeg with H.264 (libx264)', 'cmd': 'sudo apt install ffmpeg libx264-dev'})
     if ff and not ff.get('he_aac'):
-        instr.append({'title': 'Optional: ffmpeg with libfdk_aac for HE-AAC',
-                      'text': 'Distribution ffmpeg packages leave libfdk_aac out for licensing reasons. Build ffmpeg with --enable-libfdk-aac --enable-nonfree to get HE-AAC; until then AAC-LC is used.'})
+        instr.append({'title': 'Optional: a private ffmpeg with HE-AAC (libfdk_aac)',
+                      'text': 'Distribution ffmpeg leaves libfdk_aac out for licensing reasons. This builds one into '
+                              '/opt/odr-mux-manager/ffmpeg (not on the system PATH, the system ffmpeg is untouched) and '
+                              'points the manager at it. HE-AAC halves the per-frame overhead and sounds better at low bitrates.',
+                      'cmd': 'cd odr-mux-manager-source && sudo ./install.sh --with-ffmpeg'})
     instr.append({'title': 'Add a DMB service here', 'text': 'The manager creates the subchannel (type dmb, non-blocking FIFO input) and a supervisor program that runs ffmpeg, packs the stream as T-DMB and adds the outer coding.'})
     ready = bool(dm and ff)
     note = ('Tested through odr-dabmux: the stream taken back out of the mux output passes the RS check and decodes. '
@@ -208,7 +211,8 @@ def add_dmb_service(p, data: dict, cfg: dict):
     if not data.get('source'):
         raise ops.OpError('Give a source ffmpeg can open (file, URL, device or test source).')
     try:
-        budget(kind, bitrate, int(data.get('video_bitrate') or 320), data.get('audio_bitrate'), False,
+        he = bool((capabilities.detect(cfg).get('ffmpeg') or {}).get('he_aac'))
+        budget(kind, bitrate, int(data.get('video_bitrate') or 320), data.get('audio_bitrate'), he,
                int(data.get('fps') or 15))
     except ValueError as e:
         raise ops.OpError(str(e))
@@ -245,6 +249,9 @@ def add_dmb_service(p, data: dict, cfg: dict):
     exe = cfg.get('manager_exe') or 'odr-mux-manager'
     argv = [exe, 'dmb-encode', f'--fifo={fifo}', f'--kind={kind}', f'--bitrate={bitrate}',
             f'--source={data.get("source") or ""}']
+    ff = (cfg.get('tool_paths') or {}).get('ffmpeg')
+    if ff:
+        argv.append(f'--ffmpeg={ff}')           # e.g. the private build with libfdk_aac from the installer
     if data.get('input_format'):
         argv.append(f'--input-format={data["input_format"]}')
     if data.get('input_opts'):
@@ -408,7 +415,7 @@ def encode_main(argv: List[str]):
     a = ap.parse_args(argv)
     if not a.fifo and not a.udp:
         ap.error('--fifo or --udp is required')
-    caps = capabilities.detect({})
+    caps = capabilities.detect({'tool_paths': {'ffmpeg': a.ffmpeg}} if os.path.isabs(a.ffmpeg) else {})
     he = bool((caps.get('ffmpeg') or {}).get('he_aac'))
     cmd = ffmpeg_cmd(a.kind, a.source, a.bitrate, a.video_bitrate, a.size, a.ffmpeg, he,
                      a.input_format, a.input_opts, a.fps, a.audio_bitrate)

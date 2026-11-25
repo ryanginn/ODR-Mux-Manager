@@ -74,6 +74,11 @@ The installer asks for:
 
 It prints a first-run link with a setup token (`sudo odr-mux-manager setup-token`).
 
+For DMB with HE-AAC, the installer can also build a **private ffmpeg** with libx264 and libfdk_aac
+(`sudo ./install.sh --with-ffmpeg`, about 10 minutes). It goes into `/opt/odr-mux-manager/ffmpeg`,
+stays off the system PATH (your system ffmpeg is untouched), and the manager is pointed at it.
+libfdk_aac is "nonfree": that binary may be used but not redistributed.
+
 Supervisor access: the service user must be able to use `/var/run/supervisor.sock`. Set
 `chmod=0770` and `chown=root:<group>` under `[unix_http_server]` in `supervisord.conf`.
 

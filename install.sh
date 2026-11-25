@@ -3,6 +3,7 @@
 #   sudo ./install.sh                 interactive
 #   sudo ./install.sh --yes           accept defaults
 #   sudo ./install.sh --port 8092 --bind 0.0.0.0 --user ryan
+#   sudo ./install.sh --with-ffmpeg   also build a private ffmpeg (libx264 + libfdk_aac) for DMB
 set -euo pipefail
 
 APP=odr-mux-manager
@@ -17,6 +18,7 @@ PORT=8092
 BIND=127.0.0.1
 RUN_USER="${SUDO_USER:-}"
 ASSUME_YES=0
+WITH_FFMPEG=""
 
 die() { echo "error: $*" >&2; exit 1; }
 warn() { echo "warning: $*" >&2; }
@@ -27,6 +29,8 @@ while [ $# -gt 0 ]; do
         --bind) BIND="$2"; shift 2 ;;
         --user) RUN_USER="$2"; shift 2 ;;
         -y|--yes) ASSUME_YES=1; shift ;;
+        --with-ffmpeg) WITH_FFMPEG=1; shift ;;
+        --no-ffmpeg) WITH_FFMPEG=0; shift ;;
         -h|--help) sed -n '2,6p' "$0"; exit 0 ;;
         *) die "unknown option $1" ;;
     esac
@@ -55,6 +59,15 @@ if ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$PORT\$"; then
 fi
 echo "  The service user must be able to edit your mux folder (conf.mux, supervisor/, mot/)."
 RUN_USER=$(ask "Run as user" "${RUN_USER:-odr}")
+if [ -z "$WITH_FFMPEG" ]; then
+    if [ -x "$PREFIX/ffmpeg/bin/ffmpeg" ]; then WITH_FFMPEG=keep
+    else
+        echo "  DMB radio/TV sounds better with HE-AAC, which needs an ffmpeg built with libfdk_aac."
+        echo "  The installer can build one into $PREFIX/ffmpeg (not on the system PATH; ~10 minutes)."
+        a=$(ask "Build a private ffmpeg for DMB? (y/n)" "n")
+        case "$a" in y|Y|yes) WITH_FFMPEG=1 ;; *) WITH_FFMPEG=0 ;; esac
+    fi
+fi
 id "$RUN_USER" >/dev/null 2>&1 || die "user $RUN_USER does not exist"
 RUN_GROUP=$(id -gn "$RUN_USER")
 
@@ -75,6 +88,13 @@ fi
 "$PREFIX/venv/bin/pip" install -q "$PREFIX/src" || die "pip install failed"
 chmod -R u=rwX,go=rX "$PREFIX/venv" "$PREFIX/src"
 
+# private ffmpeg for DMB (kept out of the system PATH)
+FFMPEG_BIN=""
+if [ "$WITH_FFMPEG" = 1 ]; then
+    bash "$SRC/packaging/build-ffmpeg.sh" "$PREFIX/ffmpeg" || warn "ffmpeg build failed; DMB will use the system ffmpeg (AAC-LC)"
+fi
+[ -x "$PREFIX/ffmpeg/bin/ffmpeg" ] && FFMPEG_BIN="$PREFIX/ffmpeg/bin/ffmpeg"
+
 # command line wrapper (DMB encoder programs run it from supervisor too)
 cat > /usr/local/bin/$APP <<WRAP
 #!/bin/sh
@@ -84,15 +104,17 @@ WRAP
 chmod 755 /usr/local/bin/$APP
 
 # config: keep an existing one, only update the address
-python3 - "$CONF" "$BIND" "$PORT" "$DATA" <<'PY'
+python3 - "$CONF" "$BIND" "$PORT" "$DATA" "$FFMPEG_BIN" <<'PY'
 import json, sys, os
-path, bind, port, data = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
+path, bind, port, data, ffmpeg = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5]
 cfg = {}
 if os.path.exists(path):
     cfg = json.load(open(path))
 cfg.update(bind=bind, port=port)
 cfg.setdefault('state_dir', data)
 cfg.setdefault('manager_exe', '/usr/local/bin/odr-mux-manager')
+if ffmpeg:
+    cfg.setdefault('tool_paths', {})['ffmpeg'] = ffmpeg
 json.dump(cfg, open(path, 'w'), indent=2)
 PY
 chown -R "$RUN_USER:$RUN_GROUP" "$CONF_DIR" "$DATA"
