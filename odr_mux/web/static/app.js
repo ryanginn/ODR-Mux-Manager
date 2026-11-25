@@ -356,7 +356,7 @@ function themeToggle() {
   draw();
   return b;
 }
-function setTitle() { document.title = S.muxName ? `${S.muxName} · ODR Mux Manager` : "ODR Mux Manager"; }
+function setTitle() { document.title = S.muxName ? `${S.muxName} · MPBNL Multiplex WebFrontend` : "MPBNL Multiplex WebFrontend"; }
 try { S.collapsed = localStorage.getItem("odrmux.collapsed") === "1"; } catch (e) { /* ignore */ }
 
 const ROLE_LABEL = { admin: "Administrator", editor: "Editor", viewer: "Viewer (read-only)", station: "Station monitor" };
@@ -401,15 +401,16 @@ async function boot() {
 
 function renderFatal() {
   authCard(h("div", { class: "stack" }, h("h1", null, "Cannot reach the server"),
-    h("p", { class: "lead" }, "The ODR Mux Manager service isn't responding. Check it on the server:"),
+    h("p", { class: "lead" }, "The MPBNL Multiplex WebFrontend (odr-mux-manager) service isn't responding. Check it on the server:"),
     codeBlock("sudo systemctl status odr-mux-manager --no-pager\nsudo journalctl -u odr-mux-manager -n 50 --no-pager"),
     h("p", { class: "small muted" }, "The mux and encoders keep running either way."),
     btn("Retry", { cls: "primary block", icon: "refresh", onclick: boot })), true);
 }
 
 function brand() {
-  // logo intentionally left blank for now
-  return h("div", { class: "brand" }, h("div", { class: "brand-text" }, h("b", null, "ODR Mux Manager")),
+  return h("div", { class: "brand" },
+    h("img", { class: "brand-logo logo-dark", src: "/static/logo-dark.svg", alt: "MPBNL Multiplex WebFrontend" }),
+    h("img", { class: "brand-logo logo-light", src: "/static/logo-light.svg", alt: "MPBNL Multiplex WebFrontend" }),
     S.muxName ? h("div", { class: "mux-name", title: "Multiplex" }, icon("radio"), h("span", { class: "ellipsis" }, S.muxName)) : null);
 }
 
@@ -764,7 +765,7 @@ function monCard(s) {
     if (sl && sl.count) slide.appendChild(h("span", { class: "slide-count" }, `${sl.count}`));
     clear(chips);
     if (s.feed === "external") chips.appendChild(h("span", { class: "chip blue" }, icon("globe"), "external"));
-    if (d) { const a = procDot(d.audio, "audio"); const p = procDot(d.pad, "PAD"); if (a) chips.appendChild(a); if (p) chips.appendChild(p); }
+    if (d) { for (const [k, l] of [["audio", "audio"], ["pad", "PAD"], ["dmb", "DMB encoder"]]) { const c = procDot(d[k], l); if (c) chips.appendChild(c); } }
     if (d && d.input_state && !String(d.input_state).startsWith("Streaming")) chips.appendChild(h("span", { class: "chip amber" }, String(d.input_state).replace(/ \(\d\)/, "")));
     clear(alerts);
     for (const a of (d && d.alerts) || []) alerts.appendChild(h("span", { class: "chip " + (a.sev === "error" ? "red" : "amber") }, icon("alert"), a.msg));
@@ -886,8 +887,8 @@ async function pageStations(root, parts) {
     h("div", { class: "section-gap" }),
     h("div", { class: "card" }, h("div", { class: "table-wrap" }, h("table", null,
       h("thead", null, h("tr", null, ["#", "Station", "Codec", "Protection", "CU", "Feed", "Port", "Tag", isEditor() ? "" : null].filter((x) => x !== null).map((x) => h("th", null, x)))), tbody))),
-    d.orphans && d.orphans.length ? h("div", { class: "banner amber section-gap" }, icon("alert"), `Services without a component (not broadcast): ${d.orphans.join(", ")}`) : null,
-    data.length ? h("p", { class: "small muted section-gap" }, `${data.length} data service(s) are managed under `, h("a", { href: "#/data" }, "Data services"), ".") : null);
+    d.orphans && d.orphans.length ? h("div", { class: "banner amber mt" }, icon("alert"), `Services without a component (not broadcast): ${d.orphans.join(", ")}`) : null,
+    data.length ? h("p", { class: "small muted mt" }, `${data.length} data service(s) are managed under `, h("a", { href: "#/data" }, "Data services"), ".") : null);
 }
 
 function inputOptions() {
@@ -934,10 +935,12 @@ async function stationNew(root) {
   const psy = sel(1, [[0, "0"], [1, "1 (default)"], [2, "2"], [3, "3"]]);
   const extProto = sel("edi", [["edi", "EDI (tcp)"], ["zmq", "ZMQ"]]);
   const extPort = inp("", { type: "number", placeholder: "auto" });
-  const localBox = h("div", { class: "stack" }, h("div", { class: "grid-2" }, field("Input", ikind), field("Source", iurl)), field("MP2 psychoacoustic model", psy, { hint: "Only used for MP2 (--dabpsy)." }));
+  const psyField = field("MP2 psychoacoustic model (--dabpsy)", psy, { hint: "0-3; 1 is the encoder default." });
+  const localBox = h("div", { class: "stack" }, h("div", { class: "grid-2" }, field("Input", ikind), field("Source", iurl)), psyField);
   const extBox = h("div", { class: "grid-2" }, field("Protocol", extProto), field("Listen port", extPort, { hint: "The remote encoder sends to this port on this server." }));
   const sync = () => {
     localBox.classList.toggle("hidden", feed.value !== "local"); extBox.classList.toggle("hidden", feed.value !== "external");
+    psyField.classList.toggle("hidden", codec.value !== "mp2");
     if (codec.value === "mp2" && prot.prof.value !== "UEP") { prot.prof.value = "UEP"; prot.calc(); }
     if (codec.value !== "mp2" && prot.prof.value === "UEP") { prot.prof.value = parseInt(bitrate.value) % 32 ? "EEP_A" : "EEP_B"; prot.calc(); }
   };
@@ -1394,7 +1397,7 @@ async function pageDmb(root) {
       h("dl", { class: "kv" }, (d.checks || []).flatMap((c) => [h("dt", null, c.label), h("dd", null, h("span", { class: "chip " + (c.ok ? "green" : c.warn ? "amber" : "red") }, icon(c.ok ? "check" : "alert"), c.detail))])),
       d.ready ? h("div", { class: "banner green" }, icon("check"), "Ready to add DMB services.") : h("div", { class: "banner amber" }, icon("alert"), h("div", { class: "grow" }, "Some parts are missing. Follow the steps below.")),
       h("div", { class: "banner blue" }, icon("info"), h("div", { class: "grow" }, d.note || ""))),
-    steps.length ? h("div", { class: "card card-pad stack section-gap" }, h("h3", null, "How to get DMB working"), steps.map((s, i) => h("div", { class: "stack tight" }, h("b", null, `${i + 1}. ${s.title}`), s.text ? h("p", { class: "small" }, s.text) : null, s.cmd ? codeBlock(s.cmd) : null))) : null,
+    steps.length ? h("div", { class: "card card-pad stack mt" }, h("h3", null, "How to get DMB working"), steps.map((s, i) => h("div", { class: "stack tight" }, h("b", null, `${i + 1}. ${s.title}`), s.text ? h("p", { class: "small" }, s.text) : null, s.cmd ? codeBlock(s.cmd) : null))) : null,
     h("div", { class: "section-gap" }), h("div", { class: "row" }, h("h2", null, "DMB services"), h("span", { class: "spacer" }), ro ? null : btn("Add DMB service", { cls: "primary", icon: "plus", onclick: () => dmbAdd(d) })),
     dmbs.length ? h("div", { class: "station-grid" }, dmbs.map((s) => h("div", { class: "station-card" }, h("div", { class: "sc-head" }, h("div", { class: "logo-tile" }, icon("tv")), h("div", { class: "titles" }, h("h3", null, s.label), h("div", { class: "sub" }, `${s.bitrate} kbps · ${s.protection} · ${s.cu} CU`))),
       h("div", { class: "sc-foot" }, h("span", { class: "chip" }, s.feed), s.dmb_program ? h("span", { class: "chip mono" }, s.dmb_program) : null,
@@ -1440,10 +1443,10 @@ async function pageOutputs(root) {
       h("div", { class: "grid-4" }, field("DAB mode", g("dabmode")), field("Frames (0 = forever)", g("nbframes")), field("Syslog", g("syslog")), field("Timestamps (tist)", g("tist"))),
       h("div", { class: "grid-2" }, field("Management port", g("managementport"), { hint: "The monitor reads levels and buffer states from here." }), field("TIST offset", g("tist_offset"))),
       ro ? null : h("div", { class: "row" }, h("span", { class: "spacer" }), btn("Save general", { cls: "primary", onclick: () => saveSection("general", gen) }))),
-    h("div", { class: "card card-pad stack section-gap" }, h("h3", null, "Remote control"),
+    h("div", { class: "card card-pad stack mt" }, h("h3", null, "Remote control"),
       h("div", { class: "grid-2" }, field("Telnet port", r("telnetport")), field("ZMQ endpoint", r("zmqendpoint", { class: "mono" }))),
       ro ? null : h("div", { class: "row" }, h("span", { class: "spacer" }), btn("Save remote control", { cls: "primary", onclick: () => saveSection("remotecontrol", rc) }))),
-    h("div", { class: "card card-pad stack section-gap" }, h("h3", null, "Outputs"), h("p", { class: "small muted" }, "Edited as JSON (blocks become { }, values are strings). Outputs are where the modulator gets the mux from."),
+    h("div", { class: "card card-pad stack mt" }, h("h3", null, "Outputs"), h("p", { class: "small muted" }, "Edited as JSON (blocks become { }, values are strings). Outputs are where the modulator gets the mux from."),
       outText, ro ? null : h("div", { class: "row" }, h("span", { class: "spacer" }), btn("Save outputs", { cls: "primary", onclick: () => { let v; try { v = JSON.parse(outText.value); } catch (e) { return toast("That is not valid JSON.", "error"); } saveSection("outputs", v); } }))));
 }
 
@@ -1630,20 +1633,20 @@ async function pageSettings(root) {
           modal({ title: "Confirm the new address", body: h("div", { class: "stack" }, h("p", null, "Open the new address and confirm within 60 seconds:"), codeBlock(url), h("a", { class: "btn primary", href: url }, "Open new address")) });
         } catch (e) { /* toasted */ }
       } }))),
-    h("div", { class: "card card-pad stack section-gap" }, h("h3", null, "Control"),
+    h("div", { class: "card card-pad stack mt" }, h("h3", null, "Control"),
       h("div", { class: "grid-3" }, field("supervisord socket", sock), field("supervisorctl", ctl), field("supervisord.conf", sconf)),
       field("Restart odr-dabmux with", restart, { hint: "auto (a supervisor program running odr-dabmux), none, supervisor:<program>, systemd:<unit> or command:<shell command>." }),
       run.el),
-    h("div", { class: "card card-pad stack section-gap" }, h("h3", null, "Monitoring"),
+    h("div", { class: "card card-pad stack mt" }, h("h3", null, "Monitoring"),
       h("div", { class: "grid-2" }, field("Audio levels from", levels), field("odr-dabmux management endpoint", mgmt)),
       h("div", { class: "grid-3" }, field("Silence below (dBFS)", sdb), field("…for (seconds)", ssec), field("On-air decoder (EDI output)", onair, { hint: "auto = the mux's EDI TCP output, off, or tcp://host:port." }))),
-    h("div", { class: "card card-pad stack section-gap" }, h("h3", null, "New encoders"),
+    h("div", { class: "card card-pad stack mt" }, h("h3", null, "New encoders"),
       h("div", { class: "grid-2" }, field("Stats socket folder", statsDir), field("Run encoders as user", encUser))),
-    h("div", { class: "card card-pad stack section-gap" }, h("h3", null, "Tools"),
+    h("div", { class: "card card-pad stack mt" }, h("h3", null, "Tools"),
       h("dl", { class: "kv" }, h("dt", null, "odr-audioenc"), h("dd", null, caps.audioenc ? `${caps.audioenc.version || ""} · inputs: ${caps.inputs.join(", ") || "none"}` : "not found"),
         h("dt", null, "odr-dabmux"), h("dd", null, caps.dabmux ? caps.dabmux.version : "not found"), h("dt", null, "ffmpeg"), h("dd", null, caps.ffmpeg ? `found${caps.ffmpeg.libx264 ? " · libx264" : ""}${caps.ffmpeg.he_aac ? " · libfdk_aac" : ""}` : "not found")),
       h("div", { class: "grid-2" }, tools.map(([t, i]) => field(`${t} path`, i)))),
-    h("div", { class: "row section-gap" }, h("span", { class: "spacer" }), btn("Save settings", { cls: "primary", onclick: async () => {
+    h("div", { class: "row mt" }, h("span", { class: "spacer" }), btn("Save settings", { cls: "primary", onclick: async () => {
       try {
         await api("PUT", "/api/settings", { supervisor_socket: sock.value, supervisorctl: ctl.value, supervisor_conf: sconf.value, dabmux_restart: restart.value || "auto", run_commands: run.box.checked,
           levels_source: levels.value, dabmux_mgmt: mgmt.value, onair_edi: onair.value || "auto", silence_db: sdb.value, silence_secs: ssec.value, stats_dir: statsDir.value, encoder_user: encUser.value,

@@ -340,6 +340,13 @@ def run_fs_op(op: dict, undo_log: list) -> List[str]:
             tmp.rename(dst)
             undo_log.append({'op': 'move', 'from': str(dst), 'to': str(tmp)})
             log.append(f'moved {src} → {dst}')
+    elif kind == 'mkfifo':
+        p = Path(op['path'])
+        if not p.exists():
+            p.parent.mkdir(parents=True, exist_ok=True)
+            os.mkfifo(p, 0o664)
+            undo_log.append({'op': 'rm', 'path': str(p)})
+            log.append(f'created FIFO {p}')
     elif kind == 'stop_program':
         log.append(f'{op["name"]} will be stopped by supervisor update')
     elif kind == 'write':

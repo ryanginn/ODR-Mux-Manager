@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# ODR Mux Manager installer.
+#   sudo ./install.sh                 interactive
+#   sudo ./install.sh --yes           accept defaults
+#   sudo ./install.sh --port 8092 --bind 0.0.0.0 --user ryan
+set -euo pipefail
+
+APP=odr-mux-manager
+PREFIX=/opt/$APP
+CONF_DIR=/etc/$APP
+CONF=$CONF_DIR/config.json
+DATA=/var/lib/$APP
+UNIT=/etc/systemd/system/$APP.service
+SRC="$(cd "$(dirname "$0")" && pwd)"
+
+PORT=8092
+BIND=127.0.0.1
+RUN_USER="${SUDO_USER:-}"
+ASSUME_YES=0
+
+die() { echo "error: $*" >&2; exit 1; }
+warn() { echo "warning: $*" >&2; }
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --port) PORT="$2"; shift 2 ;;
+        --bind) BIND="$2"; shift 2 ;;
+        --user) RUN_USER="$2"; shift 2 ;;
+        -y|--yes) ASSUME_YES=1; shift ;;
+        -h|--help) sed -n '2,6p' "$0"; exit 0 ;;
+        *) die "unknown option $1" ;;
+    esac
+done
+
+[ "$(id -u)" -eq 0 ] || die "run as root (sudo ./install.sh)"
+command -v systemctl >/dev/null || die "systemd is required"
+
+ask() { # ask "question" default -> echo answer
+    local q="$1" def="$2" a=""
+    if [ "$ASSUME_YES" -eq 1 ] || [ ! -t 0 ]; then echo "$def"; return; fi
+    read -r -p "  $q [$def]: " a </dev/tty || true
+    echo "${a:-$def}"
+}
+
+echo "ODR Mux Manager installer"
+echo
+echo "  The web UI can listen on this machine only (127.0.0.1: use an SSH tunnel or a reverse"
+echo "  proxy) or on all interfaces (0.0.0.0). Admins can change this later in Settings."
+BIND=$(ask "Listen address (127.0.0.1 or 0.0.0.0)" "$BIND")
+case "$BIND" in 127.0.0.1|0.0.0.0) ;; *) die "listen address must be 127.0.0.1 or 0.0.0.0" ;; esac
+PORT=$(ask "Port (the SPI generator uses 8090)" "$PORT")
+[[ "$PORT" =~ ^[0-9]+$ ]] && [ "$PORT" -ge 1024 ] && [ "$PORT" -le 65535 ] || die "port must be 1024-65535"
+if ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$PORT\$"; then
+    if ! systemctl is-active --quiet "$APP"; then die "port $PORT is already in use"; fi
+fi
+echo "  The service user must be able to edit your mux folder (conf.mux, supervisor/, mot/)."
+RUN_USER=$(ask "Run as user" "${RUN_USER:-odr}")
+id "$RUN_USER" >/dev/null 2>&1 || die "user $RUN_USER does not exist"
+RUN_GROUP=$(id -gn "$RUN_USER")
+
+if command -v apt-get >/dev/null; then
+    apt-get install -y -qq python3 python3-venv python3-pip python3-zmq >/dev/null || warn "apt-get failed; continuing"
+else
+    warn "Not a Debian/Ubuntu system - make sure python3 (>= 3.9) with venv is installed."
+fi
+
+mkdir -p "$PREFIX" "$CONF_DIR" "$DATA"
+rm -rf "$PREFIX/src"
+cp -a "$SRC" "$PREFIX/src"
+rm -rf "$PREFIX/src/.git" "$PREFIX/src/tests/fixtures"
+if [ ! -x "$PREFIX/venv/bin/python" ]; then
+    python3 -m venv --system-site-packages "$PREFIX/venv"
+fi
+"$PREFIX/venv/bin/pip" install -q --upgrade pip >/dev/null 2>&1 || true
+"$PREFIX/venv/bin/pip" install -q "$PREFIX/src" || die "pip install failed"
+chmod -R u=rwX,go=rX "$PREFIX/venv" "$PREFIX/src"
+
+# command line wrapper (DMB encoder programs run it from supervisor too)
+cat > /usr/local/bin/$APP <<WRAP
+#!/bin/sh
+export ODR_MUX_MANAGER_CONFIG=$CONF
+exec $PREFIX/venv/bin/$APP "\$@"
+WRAP
+chmod 755 /usr/local/bin/$APP
+
+# config: keep an existing one, only update the address
+python3 - "$CONF" "$BIND" "$PORT" "$DATA" <<'PY'
+import json, sys, os
+path, bind, port, data = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
+cfg = {}
+if os.path.exists(path):
+    cfg = json.load(open(path))
+cfg.update(bind=bind, port=port)
+cfg.setdefault('state_dir', data)
+cfg.setdefault('manager_exe', '/usr/local/bin/odr-mux-manager')
+json.dump(cfg, open(path, 'w'), indent=2)
+PY
+chown -R "$RUN_USER:$RUN_GROUP" "$CONF_DIR" "$DATA"
+chmod 750 "$CONF_DIR" "$DATA"
+chmod 640 "$CONF"
+
+sed -e "s/@USER@/$RUN_USER/" -e "s/@GROUP@/$RUN_GROUP/" "$SRC/packaging/$APP.service" > "$UNIT"
+systemctl daemon-reload
+systemctl enable "$APP" >/dev/null 2>&1
+systemctl restart "$APP"
+
+# supervisor access
+SOCK=/var/run/supervisor.sock
+if [ -S "$SOCK" ] && ! runuser -u "$RUN_USER" -- test -w "$SOCK"; then
+    warn "$RUN_USER cannot use $SOCK, so the manager can't show encoder state or restart encoders."
+    echo "  Fix: in /etc/supervisor/supervisord.conf, [unix_http_server], set"
+    echo "       chmod=0770"
+    echo "       chown=root:$RUN_GROUP"
+    echo "  then: sudo systemctl restart supervisor"
+fi
+
+for _ in $(seq 1 20); do
+    if curl -fs -o /dev/null "http://127.0.0.1:$PORT/api/state" 2>/dev/null; then break; fi
+    sleep 0.5
+done
+TOKEN=$(runuser -u "$RUN_USER" -- /usr/local/bin/$APP setup-token 2>/dev/null || true)
+HOST=$( [ "$BIND" = 0.0.0.0 ] && (hostname -I 2>/dev/null | awk '{print $1}') || echo 127.0.0.1)
+echo
+echo "Installation complete."
+echo
+echo "  Open the web UI:"
+echo "    http://${HOST:-127.0.0.1}:$PORT/?token=$TOKEN"
+echo
+echo "  First-run setup token: $TOKEN"
+echo "  (show it again with: sudo $APP setup-token)"
+echo
+echo "  Service:   systemctl status $APP    ·    logs: journalctl -u $APP -f"

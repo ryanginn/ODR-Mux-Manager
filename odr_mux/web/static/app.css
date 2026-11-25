@@ -542,3 +542,4 @@ tr.removed td:last-child { opacity: 1; text-decoration: none; }
 .code.diff .del { background: rgba(240, 82, 82, .14); color: var(--red-text); }
 .code.diff .hunk { color: var(--blue-text); }
 details summary { cursor: pointer; padding: 6px 0; }
+.mt { margin-top: 18px; }

@@ -256,7 +256,7 @@ class Monitor:
         sil_secs = float(self.cfg.get('silence_secs', 10))
         for s in stations:
             enc = s.get('encoder') or {}
-            d = {'id': s['id'], 'levels': None, 'input_state': None, 'buffer': None, 'audio': None, 'pad': None,
+            d = {'id': s['id'], 'levels': None, 'input_state': None, 'buffer': None, 'audio': None, 'pad': None, 'dmb': None,
                  'dls': None, 'slides': None, 'alerts': []}
             v = (values or {}).get(s['subchannel_uid'])
             if isinstance(v, dict) and isinstance(v.get('inputstat'), dict):
@@ -306,10 +306,10 @@ class Monitor:
                 d['alerts'].append({'sev': 'error', 'code': 'nodata', 'msg': 'No data reaching odr-dabmux'})
             elif st.startswith('Unstable'):
                 d['alerts'].append({'sev': 'warning', 'code': 'unstable', 'msg': 'Input unstable (buffer under/overruns)'})
-            for k in ('audio', 'pad'):
+            for k in ('audio', 'pad', 'dmb'):
                 if d[k] and d[k]['state'] not in ('RUNNING',):
-                    d['alerts'].append({'sev': 'error' if k == 'audio' else 'warning', 'code': f'{k}-down',
-                                        'msg': f'{"Audio" if k == "audio" else "PAD"} encoder {d[k]["state"].lower()}'})
+                    d['alerts'].append({'sev': 'error' if k in ('audio', 'dmb') else 'warning', 'code': f'{k}-down',
+                                        'msg': f'{ {"audio": "Audio", "pad": "PAD", "dmb": "DMB"}[k]} encoder {d[k]["state"].lower()}'})
             if self.onair:
                 oa = self.onair.station(s['subchannel_uid'])
                 if oa:

@@ -1,0 +1,36 @@
+[Unit]
+Description=ODR Mux Manager - web UI for odr-dabmux multiplexes and encoders
+After=network-online.target supervisor.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+Group=@GROUP@
+Environment=ODR_MUX_MANAGER_CONFIG=/etc/odr-mux-manager/config.json
+ExecStart=/opt/odr-mux-manager/venv/bin/odr-mux-manager serve
+# Changing the listen address in the UI exits the process; systemd starts it again.
+Restart=always
+RestartSec=2
+UMask=0022
+StateDirectory=odr-mux-manager
+StateDirectoryMode=0750
+
+# The manager edits your mux folder, renames mot/P## folders and talks to supervisord and the
+# encoders' stats sockets in /var/tmp, so /tmp is shared and home folders stay writable.
+ProtectSystem=full
+ReadWritePaths=/etc/odr-mux-manager
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

@@ -269,3 +269,22 @@ def test_onair_decodes_dls_and_slides_from_real_mux_output():
     assert a.pad.mot.mime == 'image/jpeg' and a.pad.mot.image[:2] == b'\xff\xd8'
     assert b.pad.mot.mime == 'image/jpeg' and b.pad.mot.image[:2] == b'\xff\xd8'
     assert a.info['ps'] and a.info['sbr'] and b.info['bitrate'] == 128
+
+
+def test_dmb_pacer_emits_exact_rate_and_valid_codewords():
+    from odr_mux.dmb import Pacer, rs_syndromes_ok, NULL_TS
+    p = Pacer(136)
+    d = (FIX / 'dmb-test.ts').read_bytes()
+    for i in range(0, len(d) // 188 * 188, 188):
+        p.put_ts(d[i:i + 188])
+    out = b''.join(p.next_frame() for _ in range(200))      # more frames than input: null stuffing
+    assert len(out) == 200 * 136 * 3 and p.nulls > 0
+    I, M = 12, 17
+    pos = (I * M * I // 204 + 1) * 204
+    good = 0
+    while pos + 204 + (I - 1) * M * I < len(out):
+        pkt = bytes(out[pos + i + (i % I) * M * I] for i in range(204))
+        assert pkt[0] == 0x47 and rs_syndromes_ok(pkt)
+        good += 1
+        pos += 204
+    assert good > 100

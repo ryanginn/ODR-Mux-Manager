@@ -223,8 +223,35 @@ that a software decoder accepts, using a test receiver that we'll pick when we g
 7. On-air decoding from dabmux's EDI/ZMQ output, to show what is actually transmitted.
 8. DMB: support check and instructions page, then the outer coder, the DMB Radio encoder, and the DMB TV encoder.
 
+## Status (first build)
+
+Steps 1–8 are built and tested. 30 automated tests cover them, and they were also run live
+against real supervisord, odr-dabmux v5.5.1, odr-audioenc v3.6.0 and odr-padenc built from source.
+
+| Step | Status |
+| :-- | :-- |
+| 1. Lossless config read/write, import, CU | ✅ byte-identical round trip of both sample setups |
+| 2. Monitor main page, auth/roles, installer | ✅ levels from the dabmux management port, station-monitor scoping |
+| 3. Editors, checker, Apply/rollback | ✅ checker matches dabmux on short labels; apply restarts only changed programs |
+| 4. Remove/reorder + MOT moves + impact report | ✅ done live: P02→P01 with folder rename and encoder on the new port |
+| 5. Linking, FI, announcements, user apps | ✅ |
+| 6. Data services (SPI, Journaline, TPEG, …) | ✅ |
+| 7. On-air decoding (EDI) | ✅ DLS + MOT slides for DAB+ and MP2, from real mux output |
+| 8. DMB | ✅ outer coder byte-exact vs odr-dabmux; stream recovered from the mux output and decoded |
+
+Findings along the way:
+
+- **odr-dabmux UDP input bug.** For `type data` / `dmb`, `Udp::readFrame()` never removes consumed
+  bytes, so it repeats the first frame forever. DMB therefore uses a non-blocking FIFO.
+  Worth reporting upstream; it's a one-line fix.
+- **X-PAD continuation length.** An X-PAD without a CI list continues the previous application
+  with the length of the whole previous X-PAD (CI bytes included).
+
 ## Open questions
 
 - Should removing a station close the number gap (10→9, port 9010→9009), or only change the
-  display order? Assumed: close the gap, with the impact report.
-- Is anything else already listening on the `/var/tmp/P##.stats` sockets?
+  display order? Built: close the gap by default, with a "keep numbers" option.
+- Is anything else already listening on the `/var/tmp/P##.stats` sockets? Levels come from the
+  dabmux management port by default, so this only matters if "stats" is chosen in Settings.
+- DMB: is full T-DMB MPEG-4 Systems packaging (SL/IOD/BIFS, TS 102 428) needed? It isn't built yet.
+  Today it is plain H.264/AAC in MPEG-2 TS.

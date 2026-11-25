@@ -230,7 +230,7 @@ def next_uid(existing: List[str], prefix: str, num: Optional[int] = None) -> str
 
 def free_subch_id(p: Project) -> int:
     used = {parse_int(sc.get('id')) for sc in p.subchannels()}
-    for i in range(64):
+    for i in list(range(1, 64)) + [0]:
         if i not in used:
             return i
     raise OpError('no free subchannel id (0..63 all used)')
@@ -266,7 +266,9 @@ def next_port(p: Project, ptag: Optional[str] = None) -> int:
         cand = off + int(ptag[1:])
         if cand not in used:
             return cand
-    cand = max([x for x in used if 9000 <= x < 10000] or [9000]) + 1
+    # continue after the highest local input port (ignoring odd ones like 2492 when a 90xx block exists)
+    block = [x for x in used if 9000 <= x < 10000] or sorted(used)
+    cand = (max(block) + 1) if block else 9001
     while cand in used:
         cand += 1
     return cand

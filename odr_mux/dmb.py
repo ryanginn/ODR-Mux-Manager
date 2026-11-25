@@ -4,7 +4,9 @@ Current odr-dabmux accepts ``type dmb`` subchannels but, since its input refacto
 bytes through raw: the old DMB input that added the outer coding (Reed-Solomon (204,188) +
 convolutional byte interleaver, I=12 M=17) is "unported". This module provides that outer
 coder (a byte-exact port of odr-dabmux src/Dmb.cpp + Interleaver.cpp + lib/ReedSolomon) and an
-encoder pipeline: ffmpeg -> MPEG-2 TS -> outer coding -> UDP -> odr-dabmux.
+encoder pipeline: ffmpeg -> MPEG-2 TS -> outer coding -> paced FIFO -> odr-dabmux
+(inputproto fifo, nonblock true). The UDP input of odr-dabmux is not used: its readFrame() never
+removes consumed bytes, so it repeats the first frame forever.
 
 Limitation (see PLAN.md): full T-DMB also packs the elementary streams with MPEG-4 Systems (SL
 packets, IOD/OD/BIFS) inside the TS. ffmpeg doesn't produce that, and it isn't implemented here
@@ -12,8 +14,12 @@ yet, so receivers that insist on TS 102 428 MPEG-4 SL won't decode the picture.
 """
 from __future__ import annotations
 
+import collections
 import os
 import shlex
+import stat
+import threading
+from pathlib import Path
 import socket
 import subprocess
 import sys
@@ -157,6 +163,8 @@ def support(cfg: dict) -> dict:
         {'label': 'odr-dabmux', 'ok': bool(dm), 'detail': f'{dm["version"]}: accepts type dmb (raw)' if dm else 'not found'},
         {'label': 'DMB outer coding (RS + interleaver)', 'ok': True, 'detail':
             'done by ODR Mux Manager (odr-dabmux no longer does it)'},
+        {'label': 'Input path', 'ok': True, 'detail':
+            'non-blocking FIFO (the odr-dabmux UDP input repeats one frame forever, so it is not used)'},
         {'label': 'ffmpeg', 'ok': bool(ff), 'detail': 'found' if ff else 'not found'},
         {'label': 'H.264 encoder (DMB TV)', 'ok': bool(ff and ff.get('h264')), 'warn': not (ff and ff.get('h264')),
          'detail': 'libx264' if ff and ff.get('libx264') else ('hardware encoder' if ff and ff.get('h264') else 'missing')},
@@ -178,7 +186,8 @@ def support(cfg: dict) -> dict:
                       'text': 'Distribution ffmpeg packages leave libfdk_aac out for licensing reasons. Build ffmpeg with --enable-libfdk-aac --enable-nonfree to get HE-AAC; until then AAC-LC is used.'})
     instr.append({'title': 'Add a DMB service here', 'text': 'The manager creates the subchannel (type dmb, UDP input) and a supervisor program that runs ffmpeg and the outer coder.'})
     ready = bool(dm and ff)
-    note = ('T-DMB needs a lot of capacity (DMB TV ~300–550 kbps ≈ 200–400 CU) and few receivers outside Korea '
+    note = ('Tested through odr-dabmux: the stream taken back out of the mux output passes the RS check and decodes. '
+            'T-DMB needs a lot of capacity (DMB TV ~300–550 kbps ≈ 200–400 CU) and few receivers outside Korea '
             'decode it. The outer coding is a byte-exact port of odr-dabmux\'s original DMB code.')
     return {'ready': ready, 'checks': checks, 'instructions': instr, 'note': note}
 
@@ -209,9 +218,13 @@ def add_dmb_service(p, data: dict, cfg: dict):
     sc = Node(scuid, None, [])
     for k, v in (('type', 'dmb'), ('bitrate', str(bitrate)), ('id', str(ops.free_subch_id(p))),
                  ('protection-profile', data.get('profile') or 'EEP_A'), ('protection', str(data.get('protection') or 3)),
-                 ('inputproto', 'udp')):
+                 ('inputproto', 'fifo')):
         sc.append(Node(k, v))
-    u = Node('inputuri', f'udp://0.0.0.0:{port}'); u.quoted = True; sc.append(u)
+    # odr-dabmux's UDP input repeats the first frame forever (it never consumes its buffer), so
+    # DMB goes through a non-blocking FIFO that the encoder fills at exactly the subchannel rate.
+    fifo = str(Path(p.root) / 'dmb' / (ops.slug(label) + '.fifo'))
+    u = Node('inputuri', fifo); u.quoted = True; sc.append(u)
+    sc.append(Node('nonblock', 'true'))
     subs.append(sc)
     comp = Node(cuid, None, [])
     comp.append(Node('type', '24'))      # DSCTy 24: MPEG-2 Transport Stream
@@ -222,7 +235,7 @@ def add_dmb_service(p, data: dict, cfg: dict):
     # encoder program
     import sys as _sys
     exe = cfg.get('manager_exe') or 'odr-mux-manager'
-    argv = [exe, 'dmb-encode', f'--udp=127.0.0.1:{port}', f'--kind={kind}', f'--bitrate={bitrate}',
+    argv = [exe, 'dmb-encode', f'--fifo={fifo}', f'--kind={kind}', f'--bitrate={bitrate}',
             f'--source={data.get("source") or ""}']
     if kind == 'tv':
         argv += [f'--video-bitrate={int(data.get("video_bitrate") or 320)}', f'--size={data.get("size") or "320x240"}']
@@ -230,7 +243,7 @@ def add_dmb_service(p, data: dict, cfg: dict):
     name = 'odr-dmbencoder-' + ops.slug(label)
     entries = ops._template_entries(p, 'audioenc', name)
     f.add_program(name, entries, tag='DMB', argv=argv)
-    return {'station': station_key(svc, sc), 'fs': []}
+    return {'station': station_key(svc, sc), 'fs': [{'op': 'mkfifo', 'path': fifo}]}
 
 
 # ------------------------------------------------------------------ CLI entry points
@@ -266,11 +279,13 @@ def ffmpeg_cmd(kind: str, source: str, bitrate: int, video_bitrate: int = 320, s
     cmd = [ffmpeg, '-hide_banner', '-loglevel', 'warning', '-re', '-i', source]
     if kind == 'tv':
         a_kbps = 64 if he_aac else 96
+        video_bitrate = min(video_bitrate, int(ts_kbps * 0.8) - a_kbps)
         cmd += ['-map', '0:v:0', '-map', '0:a:0', '-c:v', 'libx264', '-profile:v', 'baseline', '-level', '1.3',
                 '-s', size, '-r', '15', '-b:v', f'{video_bitrate}k', '-maxrate', f'{video_bitrate}k',
                 '-bufsize', f'{video_bitrate}k', '-g', '30', '-x264-params', 'nal-hrd=cbr']
     else:
-        a_kbps = min(ts_kbps - 16, 128)
+        # leave ~25% for TS/PES/PSI overhead so the CBR mux never overflows
+        a_kbps = max(32, min(int(ts_kbps * 0.75) // 8 * 8, 192))
         cmd += ['-map', '0:a:0', '-vn']
     if he_aac:
         cmd += ['-c:a', 'libfdk_aac', '-profile:a', 'aac_he_v2' if a_kbps <= 64 else 'aac_he']
@@ -281,10 +296,43 @@ def ffmpeg_cmd(kind: str, source: str, bitrate: int, video_bitrate: int = 320, s
     return cmd
 
 
+NULL_TS = b'\x47\x1f\xff\x10' + b'\xff' * 184
+
+
+class Pacer:
+    """Emit exactly bitrate*3 coded bytes per 24 ms frame; fill gaps with null TS packets so the
+    interleaved stream is never interrupted (a gap would corrupt 12 x 17 bytes of history)."""
+
+    def __init__(self, bitrate: int):
+        self.frame = bitrate * 3
+        self.coder = OuterCoder()
+        self.queue = collections.deque()
+        self.pending = b''
+        self.nulls = 0
+
+    def put_ts(self, data: bytes):
+        self.queue.append(data)
+        # don't let a stalled consumer build up seconds of latency
+        while len(self.queue) > 4000:
+            self.queue.popleft()
+
+    def next_frame(self) -> bytes:
+        while len(self.pending) < self.frame:
+            if self.queue:
+                pkt = self.queue.popleft()
+            else:
+                pkt = NULL_TS
+                self.nulls += 1
+            self.pending += self.coder.feed(pkt)
+        out, self.pending = self.pending[:self.frame], self.pending[self.frame:]
+        return out
+
+
 def encode_main(argv: List[str]):
     import argparse
     ap = argparse.ArgumentParser(prog='odr-mux-manager dmb-encode')
-    ap.add_argument('--udp', required=True)
+    ap.add_argument('--fifo', help='write to this FIFO (odr-dabmux inputproto fifo, nonblock true)')
+    ap.add_argument('--udp', help='send UDP to host:port instead')
     ap.add_argument('--kind', default='radio', choices=['radio', 'tv'])
     ap.add_argument('--bitrate', type=int, required=True)
     ap.add_argument('--source', required=True)
@@ -292,23 +340,53 @@ def encode_main(argv: List[str]):
     ap.add_argument('--size', default='320x240')
     ap.add_argument('--ffmpeg', default='ffmpeg')
     a = ap.parse_args(argv)
+    if not a.fifo and not a.udp:
+        ap.error('--fifo or --udp is required')
     caps = capabilities.detect({})
     he = bool((caps.get('ffmpeg') or {}).get('he_aac'))
     cmd = ffmpeg_cmd(a.kind, a.source, a.bitrate, a.video_bitrate, a.size, a.ffmpeg, he)
     print('running: ' + ' '.join(shlex.quote(x) for x in cmd), file=sys.stderr)
-    h, _, port = a.udp.rpartition(':')
-    dest = (h or '127.0.0.1', int(port))
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    coder = OuterCoder()
+    if a.fifo:
+        if not os.path.exists(a.fifo):
+            os.makedirs(os.path.dirname(a.fifo), exist_ok=True)
+            os.mkfifo(a.fifo, 0o664)
+        sink_fd = os.open(a.fifo, os.O_WRONLY)
+        send = lambda b: os.write(sink_fd, b)
+    else:
+        h, _, port = a.udp.rpartition(':')
+        dest = (h or '127.0.0.1', int(port))
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        send = lambda b: sock.sendto(b, dest)
+    pacer = Pacer(a.bitrate)
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-    try:
+    done = threading.Event()
+
+    def reader():
+        buf = b''
         while True:
-            data = proc.stdout.read(188 * 7)
+            data = proc.stdout.read(188 * 8)
             if not data:
                 break
-            enc = coder.feed(data)
-            for i in range(0, len(enc), 204 * 7):
-                sock.sendto(enc[i:i + 204 * 7], dest)
+            buf += data
+            n = len(buf) // 188 * 188
+            for i in range(0, n, 188):
+                pacer.put_ts(buf[i:i + 188])
+            buf = buf[n:]
+        done.set()
+    threading.Thread(target=reader, daemon=True).start()
+    t0 = time.monotonic()
+    k = 0
+    try:
+        for _ in range(4):          # small head start so odr-dabmux never runs dry
+            send(pacer.next_frame())
+        while not (done.is_set() and not pacer.queue):
+            k += 1
+            delay = t0 + k * 0.024 - time.monotonic()
+            if delay > 0:
+                time.sleep(delay)
+            send(pacer.next_frame())
+            if k % 2500 == 0:
+                print(f'dmb: {k} frames, {pacer.nulls} null packets inserted', file=sys.stderr)
     finally:
         proc.kill()
     return proc.wait()

@@ -105,6 +105,11 @@ def cmd_check(args):
 
 
 def main(argv=None):
+    raw = list(sys.argv[1:] if argv is None else argv)
+    # encoder helpers run from supervisor: pass their options straight through
+    if raw[:1] == ['dmb-encode']:
+        from .dmb import encode_main
+        return encode_main(raw[1:])
     ap = argparse.ArgumentParser(prog='odr-mux-manager')
     ap.add_argument('--config', default=None, help='config file (default /etc/odr-mux-manager/config.json)')
     sub = ap.add_subparsers(dest='cmd')
