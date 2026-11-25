@@ -113,9 +113,34 @@ function append(el, children) {
 const put = (el, ...children) => append(el, children);
 function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); return el; }
 function btn(label, opts = {}) {
-  return h("button", { class: "btn " + (opts.cls || ""), type: opts.type || "button", onclick: opts.onclick, disabled: opts.disabled, title: opts.title },
+  // "Save..." buttons take part in the unsaved-changes guard: editing a field near one marks it dirty,
+  // clicking it clears that again
+  const isSave = typeof label === "string" && /^Save\b/.test(label) && /primary/.test(opts.cls || "") && opts.onclick;
+  const onclick = isSave ? (e) => { DIRTY.delete(b); return opts.onclick(e); } : opts.onclick;
+  const b = h("button", { class: "btn " + (opts.cls || ""), type: opts.type || "button", onclick, disabled: opts.disabled, title: opts.title },
     opts.icon ? icon(opts.icon) : null, label);
+  if (isSave) { b.dataset.save = "1"; b._save = opts.onclick; }
+  return b;
 }
+
+/* ---- unsaved changes: warn before a tab/page switch throws edits away ---- */
+const DIRTY = new Set();
+function liveDirty() { for (const b of [...DIRTY]) if (!b.isConnected) DIRTY.delete(b); return [...DIRTY]; }
+function trackDirty(container) {
+  const mark = (e) => {
+    const el = e.target;
+    if (!(el instanceof HTMLElement) || !el.matches("input, select, textarea") || el.type === "search" || el.dataset.nodirty) return;
+    // the nearest enclosing block with a Save button owns this field; stop at the page itself, so
+    // filters and search boxes in the page header never count as edits
+    for (let n = el.parentElement; n && n !== container; n = n.parentElement) {
+      const b = n.querySelector(":scope button[data-save]");
+      if (b) { DIRTY.add(b); return; }
+    }
+  };
+  container.addEventListener("input", mark, true);
+  container.addEventListener("change", mark, true);
+}
+window.addEventListener("beforeunload", (e) => { if (liveDirty().length) { e.preventDefault(); e.returnValue = ""; } });
 function iconBtn(name, title, onclick) {
   return h("button", { class: "icon-btn", type: "button", title, "aria-label": title, onclick }, icon(name));
 }
@@ -564,6 +589,26 @@ function setCrumbs(...parts) {
 
 function route() {
   if (!shellEls) return;
+  if (S.skipRoute) { S.skipRoute = false; return; }
+  const dirty = liveDirty();
+  if (dirty.length && S.currentHash != null && location.hash !== S.currentHash) {
+    const target = location.hash;
+    S.skipRoute = true;            // putting the old URL back fires hashchange: don't re-render for it
+    location.hash = S.currentHash;
+    const go = () => { DIRTY.clear(); location.hash = target; };
+    const m = modal({ title: "Unsaved changes",
+      body: h("p", null, "You changed fields on this page without saving them. Save them to the draft first, or throw them away?"),
+      foot: [btn("Stay here", { onclick: () => m.close() }),
+        btn("Discard", { cls: "danger ghost", onclick: () => { m.close(); go(); } }),
+        btn("Save and continue", { cls: "primary", onclick: async () => {
+          m.close();
+          for (const b of dirty) { try { await b._save(); } catch (e) { /* toasted */ } }
+          go();
+        } })] });
+    return;
+  }
+  DIRTY.clear();
+  S.currentHash = location.hash;
   stopMon();
   closeAllModals();
   const parts = (location.hash.replace(/^#\/?/, "") || "monitor").split("/");
@@ -573,6 +618,7 @@ function route() {
   // render finished - e.g. a save that changes the URL *and* re-routes - the old render writes into
   // a detached element instead of duplicating everything on screen.
   const content = h("div", { class: "page" });
+  trackDirty(content);
   clear(shellEls.content).appendChild(content);
   const pages = { monitor: pageMonitor, stations: pageStations, ensemble: pageEnsemble, linking: pageLinking, announcements: pageAnnouncements,
     data: pageData, dmb: pageDmb, outputs: pageOutputs, checks: pageChecks, changes: pageChanges, files: pageFiles,

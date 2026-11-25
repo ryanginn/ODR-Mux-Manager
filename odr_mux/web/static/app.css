@@ -561,18 +561,16 @@ details summary { cursor: pointer; padding: 6px 0; }
 .lg-key.pending { border: 2px dashed var(--amber); background: transparent; }
 .st-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; vertical-align: 1px; flex: none; font-style: normal; }
 
-/* capacity bar v2: rounded segments with small gaps, tooltip centred on the pointer */
+/* capacity bar v2: flat segments with a hairline divider, rounded bar ends, tooltip centred on the pointer */
 .cu-track { position: relative; padding: 2px 0; }
 .cubar, .cubar.big { background: var(--inset); border: 0; border-radius: 999px; gap: 0; height: 14px; overflow: hidden; }
 .cubar.big { height: 16px; }
-/* the gap is a transparent border inside each segment's own width, so the widths add up to exactly
-   the bar and the last segments are never pushed off the end */
-.cubar .seg { box-sizing: border-box; border-right: 3px solid transparent; background-clip: padding-box; border-radius: 4px;
-  min-width: 12px; flex: none; }
+/* the divider is a border inside each segment's own width (border-box), so the widths add up to
+   exactly the bar and the last segments are never pushed off the end */
+.cubar .seg { box-sizing: border-box; border-right: 1px solid rgba(0,0,0,.35); border-radius: 0; min-width: 8px; flex: none; }
 .cubar .seg:last-of-type { border-right-width: 0; }
 .cubar .seg.free { background: none; flex: 1 1 auto; min-width: 0; border-right: 0; }
 .cubar .seg.free:hover { background: color-mix(in srgb, var(--border-strong) 35%, transparent); filter: none; }
-.cubar .seg:first-child { border-radius: 999px 3px 3px 999px; }
 .cubar .seg-label { display: none; }
 .cu-tip { position: absolute; bottom: calc(100% + 8px); left: 0; transform: translateX(-50%); display: flex; align-items: center; gap: 8px;
   white-space: nowrap; padding: 6px 12px; border-radius: 10px; font-size: 13px; background: var(--card-2); color: var(--text);
