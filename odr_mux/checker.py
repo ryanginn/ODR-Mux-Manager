@@ -172,7 +172,8 @@ def check(project: Project, check_fs: bool = False, manager_port: int | None = N
         if st['type'] == 'dabplus' and enc['codec'] == 'mp2':
             out.append(_issue('error', 'codec-mismatch', f'{st["label"]}: subchannel is DAB+ but the encoder makes MP2 (--dab).', **ref))
         if enc['bitrate'] and enc['bitrate'] != st['bitrate']:
-            out.append(_issue('error', 'bitrate-mismatch', f'{st["label"]}: encoder bitrate {enc["bitrate"]} ≠ subchannel bitrate {st["bitrate"]}.', **ref))
+            out.append(_issue('error', 'bitrate-mismatch', f'{st["label"]}: encoder bitrate {enc["bitrate"]} ≠ subchannel bitrate {st["bitrate"]}.',
+                              fix='sync-encoder-bitrate', **ref))
         rate = enc['rate']
         if rate:
             okr = (24000, 48000) if enc['codec'] == 'mp2' else (32000, 48000)
@@ -310,6 +311,17 @@ def apply_fix(project: Project, fix: str):
                 changed.append(f'{sc.key}: id {i} -> {new}')
                 i = new
             used.add(i)
+    elif fix == 'sync-encoder-bitrate':
+        # the subchannel decides the capacity, so the encoder follows it
+        for st in project.stations():
+            if st['kind'] != 'audio' or not st['audio_program'] or not st['encoder']:
+                continue
+            if st['encoder']['bitrate'] and st['encoder']['bitrate'] != st['bitrate']:
+                prog = project.program(st['audio_program'])
+                a = Args.parse(prog.argv)
+                a.set('bitrate', str(st['bitrate']))
+                prog.argv = a.to_argv()
+                changed.append(f'{st["audio_program"]}: bitrate {st["encoder"]["bitrate"]} -> {st["bitrate"]}')
     elif fix == 'fix-log-names':
         for p in project.programs():
             log = p.get('stdout_logfile')
