@@ -166,7 +166,7 @@ def test_journaline_data_service():
 def test_remove_station_closes_gap():
     p = Project.load(MP2)
     ids = [s['id'] for s in p.stations()]
-    res = renumber.apply(p, ids, remove=[ids[8]])                 # KISS, P09
+    res = renumber.apply(p, ids, remove=[ids[8]], mode='renumber')  # KISS, P09
     sts = p.stations()
     assert len(sts) == 18
     kp = next(s for s in sts if s['label'] == 'KISS+')
@@ -184,7 +184,7 @@ def test_remove_station_closes_gap():
 def test_external_ports_are_pinned():
     p = Project.load(MPBNL)
     ids = [s['id'] for s in p.stations() if s['kind'] == 'audio']
-    renumber.apply(p, ids, remove=[ids[0]])                       # remove MPB Radio 1
+    renumber.apply(p, ids, remove=[ids[0]], mode='renumber')      # remove MPB Radio 1
     ext = next(s for s in p.stations() if s['label'] == 'MPB Radio 2')
     assert ext['port'] == 2492
 
@@ -193,7 +193,7 @@ def test_keep_mode_only_reorders():
     p = Project.load(MP2)
     ids = [s['id'] for s in p.stations()]
     order = ids[1:] + ids[:1]
-    renumber.apply(p, order, mode='keep')
+    renumber.apply(p, order)                 # default: keep numbers
     sts = p.stations()
     assert sts[0]['label'] == 'RTE 2FM' and sts[0]['subchannel_uid'] == 'sub-02'
 
@@ -219,7 +219,7 @@ def test_workspace_apply_and_rollback(tmp_path):
     ws = Workspace(cfg)
     before = (root / 'conf.mux').read_text()
     ids = [s['id'] for s in ws.live().stations()]
-    ws.edit(lambda p: renumber.apply(p, ids, remove=[ids[8]]), 'test', 'remove P09')
+    ws.edit(lambda p: renumber.apply(p, ids, remove=[ids[8]], mode='renumber'), 'test', 'remove P09')
     assert ws.has_draft() and ws.diff()
     r = ws.apply('test')
     assert r['ok'], r
@@ -288,3 +288,49 @@ def test_dmb_pacer_emits_exact_rate_and_valid_codewords():
         good += 1
         pos += 204
     assert good > 100
+
+
+def test_default_keeps_numbers_on_removal():
+    p = Project.load(MP2)
+    ids = [s['id'] for s in p.stations()]
+    res = renumber.apply(p, ids, remove=[ids[8]])
+    kp = next(s for s in p.stations() if s['label'] == 'KISS+')
+    assert (kp['subchannel_uid'], kp['port'], kp['ptag']) == ('sub-10', 9010, 'P10')
+    assert not any(o['op'] == 'move_many' for o in res['fs'])
+    assert any(o['op'] == 'archive' for o in res['fs'])
+
+
+# ------------------------------------------------------------------ T-DMB packaging
+def test_tdmb_structure():
+    from odr_mux.tdmb import remux
+    from odr_mux.tsinfo import inspect, is_tdmb
+    src = (FIX / 'dmb-test.ts').read_bytes()
+    for tv in (True, False):
+        out = remux(src, tv)
+        assert len(out) % 188 == 0 and all(out[i] == 0x47 for i in range(0, len(out), 188))
+        info = inspect(out)
+        assert is_tdmb(info), info
+        types = sorted((s['stream_type'], s['es_id']) for s in info['programs'][0]['streams'])
+        assert types == ([(0x12, 3), (0x12, 4), (0x13, 1), (0x13, 2)] if tv else [(0x12, 4), (0x13, 1), (0x13, 2)])
+
+
+def test_tdmb_descriptors():
+    from odr_mux.tdmb import descr, bifs_config, initial_od
+    assert descr(0x05, b'\x00' * 200)[:3] == b'\x05\x81\x48'           # 7-bit size groups
+    assert bifs_config(320, 240) == bytes.fromhex('08380a000780')       # identical to GPAC's BIFSConfig
+    iod = initial_od(320, 240, True)
+    assert iod[0] == 0x02 and b'\x08\x38\x0a\x00\x07\x80' in iod
+
+
+@pytest.mark.skipif(shutil.which('gpac') is None or shutil.which('ffmpeg') is None, reason='needs gpac + ffmpeg')
+def test_tdmb_decodes_in_gpac(tmp_path):
+    import subprocess
+    from odr_mux.tdmb import remux
+    src = (FIX / 'dmb-test.ts').read_bytes()
+    (tmp_path / 'tv.ts').write_bytes(remux(src, True))
+    subprocess.run(['gpac', '-i', str(tmp_path / 'tv.ts'), '-o', str(tmp_path / 'tv.mp4')], capture_output=True, timeout=120)
+    r = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'stream=codec_name,width', '-of', 'csv=p=0',
+                        str(tmp_path / 'tv.mp4')], capture_output=True, text=True)
+    assert 'h264,320' in r.stdout and 'aac' in r.stdout
+    r = subprocess.run(['ffmpeg', '-v', 'error', '-i', str(tmp_path / 'tv.mp4'), '-f', 'null', '-'], capture_output=True, text=True)
+    assert r.returncode == 0 and not r.stderr.strip()

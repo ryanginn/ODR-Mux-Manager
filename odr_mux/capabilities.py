@@ -67,7 +67,7 @@ def detect(cfg: Optional[dict] = None, max_age=300) -> dict:
         return _cache['data']
     ov = (cfg or {}).get('tool_paths') or {}
     tools = {}
-    for name in ('odr-audioenc', 'odr-padenc', 'odr-dabmux', 'odr-dabmod', 'ffmpeg', 'supervisorctl'):
+    for name in ('odr-audioenc', 'odr-padenc', 'odr-dabmux', 'odr-dabmod', 'ffmpeg', 'supervisorctl', 'gpac'):
         tools[name] = find_tool(name, ov)
     data = {'tools': tools}
     data['audioenc'] = audioenc_features(tools['odr-audioenc']) if tools['odr-audioenc'] else None

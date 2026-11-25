@@ -24,19 +24,25 @@ it imports what is there, without changing anything until you click **Apply**.
   - stations fed by EDI/ZMQ from another machine get no encoders
   - switching a station to external parks its encoders; switching back restores them exactly
 - **Remove / reorder with renumbering**:
-  - remove station 9 and 10→9, 11→10 …: service/subchannel/component names, subchannel id, port,
-    `mot/P##`, stats and DLS paths and `# P##` comments all shift
+  - by default, numbers stay as they are and only the order changes
+  - optional "close gaps": remove station 9 and 10→9, 11→10 …; service/subchannel/component names,
+    subchannel id, port, `mot/P##`, stats and DLS paths and `# P##` comments all shift
   - an **impact report** lists everything outside the manager that has to be repointed
   - folders are renamed in two steps; external feeds keep their port
-  - a "keep numbers" mode only changes the order
 - **Linking & FI**, **other ensembles**, **announcement clusters**, and per-service announcement support.
 - **Data services**:
   - SPI, **Journaline**, TPEG, Broadcast Website, packet slideshow, or custom
   - each one points at a generator's `.dat` file and sets packet address, data groups and user-app signalling
-- **DMB radio/TV (experimental)**:
-  - checks what the server can do and tells you what's missing
-  - ffmpeg → TS → Reed-Solomon (204,188) + interleaver (a byte-exact port of odr-dabmux's original
-    DMB code) → paced FIFO → odr-dabmux
+- **DMB radio/TV (T-DMB)**:
+  - any ffmpeg input: files, HLS/RTMP/SRT/HTTP streams, capture devices (v4l2, DeckLink, ALSA…)
+    or test sources, with an input format and extra input options
+  - ffmpeg encodes H.264 Baseline + AAC; the manager packs it as T-DMB (MPEG-4 Systems: IOD in the
+    PMT, OD + BIFS scene in SL sections, SL-packetized PES), adds Reed-Solomon (204,188) + the
+    interleaver (byte-exact with odr-dabmux's original DMB code), and feeds a non-blocking FIFO at
+    exactly the subchannel rate (null-packet stuffing)
+  - the audio/video split is worked out from the subchannel size after the packaging overhead,
+    and a subchannel that's too small is refused
+  - checked by decoding the stream back out of odr-dabmux's output with GPAC
 - **Checks**:
   - over capacity, invalid UEP/EEP combinations, short labels odr-dabmux rejects, garbled labels (auto-fix)
   - codec or bitrate mismatch between encoder and subchannel
@@ -68,6 +74,11 @@ The installer asks for:
 
 It prints a first-run link with a setup token (`sudo odr-mux-manager setup-token`).
 
+For DMB with HE-AAC, the installer can also build a **private ffmpeg** with libx264 and libfdk_aac
+(`sudo ./install.sh --with-ffmpeg`, about 10 minutes). It goes into `/opt/odr-mux-manager/ffmpeg`,
+stays off the system PATH (your system ffmpeg is untouched), and the manager is pointed at it.
+libfdk_aac is "nonfree": that binary may be used but not redistributed.
+
 Supervisor access: the service user must be able to use `/var/run/supervisor.sock`. Set
 `chmod=0770` and `chown=root:<group>` under `[unix_http_server]` in `supervisord.conf`.
 
@@ -91,6 +102,6 @@ python3 -m odr_mux check /path/to/dab        # station list + checks on the comm
 The tests cover:
 - byte-identical round trips of real configs
 - renumbering, and apply/rollback on a real folder
-- the DMB coder against odr-dabmux's reference code
+- the DMB coder against odr-dabmux's reference code, and the T-DMB structure (plus a GPAC decode when GPAC is installed)
 - DLS and slide decoding from a capture of real odr-dabmux output
 - the API's role scoping and secret handling

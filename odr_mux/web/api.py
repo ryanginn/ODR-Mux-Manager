@@ -424,7 +424,7 @@ def stations_plan():
     _need_project()
     data = json_body()
     try:
-        pl = renumber.plan(ws().draft(), data.get('order') or [], data.get('remove') or [], data.get('mode', 'renumber'))
+        pl = renumber.plan(ws().draft(), data.get('order') or [], data.get('remove') or [], data.get('mode', 'keep'))
     except renumber.RenumberError as e:
         raise ApiError(str(e))
     return jsonify(pl)
@@ -435,7 +435,7 @@ def stations_plan():
 def stations_reorder():
     data = json_body()
     rm = data.get('remove') or []
-    res = _edit(lambda p: renumber.apply(p, data.get('order') or [], rm, data.get('mode', 'renumber')),
+    res = _edit(lambda p: renumber.apply(p, data.get('order') or [], rm, data.get('mode', 'keep')),
                 ('remove ' + ', '.join(rm) + ' and ' if rm else '') + f'reorder ({data.get("mode", "renumber")})')
     return jsonify(ok=True, plan=res)
 
