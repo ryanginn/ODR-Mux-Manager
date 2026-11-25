@@ -58,7 +58,9 @@ class Workspace:
 
     def supervisor(self) -> Supervisor:
         return Supervisor(self.cfg.get('supervisor_socket', '/var/run/supervisor.sock'),
-                          self.cfg.get('supervisorctl', 'supervisorctl'), self.cfg.get('supervisor_conf'))
+                          self.cfg.get('supervisorctl', 'supervisorctl'), self.cfg.get('supervisor_conf'),
+                          use_sudo=self.cfg.get('supervisor_sudo') or 'auto',
+                          restart_cmd=self.cfg.get('supervisor_restart_cmd') or 'sudo -n systemctl restart supervisor')
 
     # ---------------------------------------------------------------- draft
     def _load_draft(self):
@@ -214,6 +216,15 @@ class Workspace:
 
     def reload(self, sup_changed: bool, mux_changed: bool, live: Optional[Project] = None) -> List[str]:
         log = []
+        if self.cfg.get('supervisor_reload') == 'restart':
+            # restart the whole supervisor service: every encoder (and odr-dabmux, if supervisor runs it)
+            # starts fresh with the new config
+            if sup_changed or mux_changed:
+                log += self.supervisor().restart_service()
+                p = live or self.live()
+                if mux_changed and p.dabmux_program() is None:
+                    log += self.restart_dabmux(p)
+            return log
         if sup_changed:
             log += self.supervisor().update()
         if mux_changed:

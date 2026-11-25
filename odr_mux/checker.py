@@ -240,6 +240,9 @@ def check(project: Project, check_fs: bool = False, manager_port: int | None = N
             if sc and project.subchannel(sc) is None:
                 out.append(_issue('error', 'ann-sub', f'Announcement cluster {cl.key}: subchannel {sc} does not exist', cluster=cl.key))
 
+    # ---------------------------------------------------------------- values odr-dabmux parses with hexparse()
+    out += _hex_value_checks(project)
+
     order = {'error': 0, 'warning': 1, 'info': 2}
     out.sort(key=lambda i: order[i['severity']])
     return out
@@ -265,6 +268,11 @@ def apply_fix(project: Project, fix: str):
                 if v and looks_mojibake(v):
                     n.set(k, repair_mojibake(v))
                     changed.append(f'{n.key}.{k}')
+    elif fix == 'drop-empty':
+        for n in list(_walk(project.mux.root)):
+            if n.children is None and n.value is not None and n.value.strip() == '' and n.parent is not None:
+                n.parent.remove(n)
+                changed.append(_path(n) if n.parent else n.key)
     elif fix == 'fix-log-names':
         for p in project.programs():
             log = p.get('stdout_logfile')
@@ -273,3 +281,57 @@ def apply_fix(project: Project, fix: str):
                 p.set('stdout_logfile', newlog)
                 changed.append(p.program)
     return changed
+
+
+# keys odr-dabmux reads with hexparse() (decimal or 0x-hex, nothing else), per section
+_HEX_KEYS = {
+    'ensemble': {'id', 'ecc', 'fig2_label_character_flag'},
+    'services': {'id', 'ecc', 'pty', 'language'},
+    'subchannels': {'id'},
+    'components': {'type', 'figtype', 'address'},
+    'linking': {'lsn', 'id', 'ecc'},
+    'frequency_information': {'eid', 'pi_code', 'drm_id', 'amss_id'},
+    'other-services': {'id'},
+    'service-component-information': {'id', 'transfer_sid', 'transfer_eid'},
+}
+_HEX_RE = __import__('re').compile(r'^(0x[0-9a-fA-F]+|[0-9]+)$')
+
+
+def _hex_value_checks(project):
+    out = []
+    for sec, keys in _HEX_KEYS.items():
+        root = project.sec(sec) if sec != 'ensemble' else project.sec('ensemble')
+        if root is None:
+            continue
+        nodes = [root] if sec == 'ensemble' else list(_walk(root))
+        for n in nodes:
+            for c in (n.children or []) if sec == 'ensemble' else [n]:
+                if c.children is not None or c.key not in keys:
+                    continue
+                v = (c.value or '').strip()
+                if not _HEX_RE.match(v):
+                    where = _path(c)
+                    what = 'is empty' if not v else f'is "{v}", which is not a number'
+                    out.append(_issue('error', 'bad-number', f'{where} {what}. odr-dabmux will refuse to start '
+                                      f'("hexparse"). Use decimal or 0x-hex, or remove the line.', fix='drop-empty'
+                                      if not v else None, path=where))
+    for n in _walk(project.mux.root):
+        if n.children is None and n.value is not None and n.value.strip() == '' and n.key not in ('label', 'shortlabel'):
+            p = _path(n)
+            if not any(i['ref'].get('path') == p for i in out):
+                out.append(_issue('warning', 'empty-value', f'{p} has an empty value.', fix='drop-empty', path=p))
+    for svc in project.services():
+        an = svc.child('announcements')
+        if an is not None and an.children and not (an.get('clusters') or '').strip() \
+                and any((c.value or '') == 'true' for c in an.children if c.key != 'clusters'):
+            out.append(_issue('warning', 'ann-no-cluster', f'Service {svc.key} takes part in announcements but has no '
+                              f'cluster list, so it will not follow any announcement.', service=svc.key))
+    return out
+
+
+def _path(n):
+    parts = []
+    while n is not None and n.key:
+        parts.append(n.key)
+        n = n.parent
+    return '.'.join(reversed(parts))

@@ -5,7 +5,7 @@ set -euo pipefail
 APP=odr-mux-manager
 [ "$(id -u)" -eq 0 ] || { echo "run as root" >&2; exit 1; }
 systemctl disable --now "$APP" 2>/dev/null || true
-rm -f /etc/systemd/system/$APP.service /usr/local/bin/$APP
+rm -f /etc/systemd/system/$APP.service /usr/local/bin/$APP /etc/sudoers.d/$APP
 systemctl daemon-reload
 rm -rf /opt/$APP
 if [ "${1:-}" = "--purge" ]; then

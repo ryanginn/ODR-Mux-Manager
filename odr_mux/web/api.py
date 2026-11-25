@@ -603,11 +603,20 @@ def get_checks():
     return jsonify(issues=checker.check(ws().draft(), check_fs=cfg().get('check_fs', True), manager_port=cfg().get('port')))
 
 
+@bp.post('/api/checks/dabmux')
+@require('editor')
+def check_dabmux():
+    _need_project()
+    from ..validate import check_with_dabmux
+    dm = (capabilities.detect(cfg()).get('tools') or {}).get('odr-dabmux')
+    return jsonify(check_with_dabmux(ws().draft().texts()['mux'], dm))
+
+
 @bp.post('/api/checks/fix')
 @require('editor')
 def fix_checks():
     fix = json_body().get('fix')
-    if fix not in ('repair-labels', 'fix-log-names'):
+    if fix not in ('repair-labels', 'fix-log-names', 'drop-empty'):
         raise ApiError('Unknown fix.')
     changed = []
 
@@ -641,10 +650,21 @@ def discard_draft():
 def apply():
     _need_project()
     p = ws().draft()
+    body = json_body()
     errors = [i for i in checker.check(p, manager_port=cfg().get('port')) if i['severity'] == 'error']
-    if errors and not json_body().get('force'):
+    if errors and not body.get('force'):
         return jsonify(ok=False, blocked=True, errors=errors,
                        message=f'{len(errors)} error(s) would stop odr-dabmux or an encoder. Fix them or apply anyway.'), 409
+    # let odr-dabmux itself parse the new config first; a config it rejects is never written
+    if cfg().get('validate_with_dabmux', True) and ws().live().texts()['mux'] != p.texts()['mux']:
+        from ..validate import check_with_dabmux
+        dm = (capabilities.detect(cfg()).get('tools') or {}).get('odr-dabmux')
+        v = check_with_dabmux(p.texts()['mux'], dm)
+        if not v['ok'] and not body.get('force_dabmux'):
+            audit('apply.rejected_by_dabmux', v['message'])
+            return jsonify(ok=False, blocked=True, dabmux=True, message=f'odr-dabmux rejected the new config: {v["message"]}',
+                           errors=[{'severity': 'error', 'code': 'dabmux', 'message': v['message'], 'ref': {}}],
+                           log=v.get('log', '')), 409
     res = ws().apply(current_user()['username'])
     db.x('INSERT INTO applies(ts, username, backup, status, message, log) VALUES (?,?,?,?,?,?)',
          (time.time(), current_user()['username'], res.get('backup', ''), 'ok' if res['ok'] else 'error',
@@ -915,7 +935,8 @@ def audit_log():
 
 
 # ===================================================================== settings / network
-SETTING_KEYS = {'supervisor_socket': str, 'supervisorctl': str, 'supervisor_conf': str, 'dabmux_restart': str,
+SETTING_KEYS = {'validate_with_dabmux': bool, 'supervisor_socket': str, 'supervisorctl': str, 'supervisor_conf': str, 'dabmux_restart': str,
+                'supervisor_reload': str, 'supervisor_restart_cmd': str, 'supervisor_sudo': str,
                 'run_commands': bool, 'levels_source': str, 'dabmux_mgmt': str, 'onair_edi': str,
                 'silence_db': float, 'silence_secs': float, 'check_fs': bool, 'stats_dir': str,
                 'encoder_user': str, 'session_hours': int, 'behind_proxy': bool, 'tool_paths': dict}
@@ -947,6 +968,10 @@ def put_settings():
             c[k] = typ(v) if typ is not dict else ({kk: str(vv) for kk, vv in v.items() if vv} if isinstance(v, dict) else {})
         except (TypeError, ValueError):
             raise ApiError(f'Invalid value for {k}.')
+    if c.get('supervisor_reload') not in ('update', 'restart'):
+        raise ApiError('After Apply must be "update" or "restart".')
+    if c.get('supervisor_sudo') not in ('auto', 'always', 'never'):
+        raise ApiError('supervisor_sudo must be auto, always or never.')
     if c.get('levels_source') not in ('dabmux', 'stats', 'both'):
         raise ApiError('levels_source must be dabmux, stats or both.')
     if c.get('dabmux_restart') and not re.match(r'^(auto|none|supervisor:\S+|systemd:\S+|command:.+)$', c['dabmux_restart']):

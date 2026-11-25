@@ -334,3 +334,47 @@ def test_tdmb_decodes_in_gpac(tmp_path):
     assert 'h264,320' in r.stdout and 'aac' in r.stdout
     r = subprocess.run(['ffmpeg', '-v', 'error', '-i', str(tmp_path / 'tv.mp4'), '-f', 'null', '-'], capture_output=True, text=True)
     assert r.returncode == 0 and not r.stderr.strip()
+
+
+# ------------------------------------------------------------------ DL Plus, hex values, odr-dabmux pre-check
+def test_dls_with_dl_plus():
+    from odr_mux.monitor import parse_dls_text
+    d = parse_dls_text('##### parameters { #####\nDL_PLUS=1\nDL_PLUS_ITEM_TOGGLE=0\nDL_PLUS_ITEM_RUNNING=1\n'
+                       'DL_PLUS_TAG=4 0 14\nDL_PLUS_TAG=1 18 21\n##### parameters } #####\n'
+                       'Whitney Houston - Love Will Save The Day')
+    assert d['text'] == 'Whitney Houston - Love Will Save The Day'
+    assert (d['artist'], d['title']) == ('Whitney Houston', 'Love Will Save The Day')
+    assert parse_dls_text('plain text')['dlplus'] is None
+
+
+def test_checker_flags_values_dabmux_cannot_parse():
+    p = Project.load(MP2)
+    p.subchannel('sub-01').set('id', 'auto')
+    p.component('comp-02').set('type', '')
+    msgs = [i['message'] for i in checker.check(p) if i['code'] == 'bad-number']
+    assert any('subchannels.sub-01.id' in m for m in msgs) and any('components.comp-02.type' in m for m in msgs)
+    checker.apply_fix(p, 'drop-empty')
+    assert p.component('comp-02').child('type') is None
+
+
+def test_empty_strings_are_never_written():
+    from odr_mux.project import merge_json
+    p = Project.load(MPBNL)
+    merge_json(p.sec('linking'), {'set-x': {'lsn': '0x111', 'keyservice': 'srv-01', 'list': {'a': {'type': 'fm', 'id': '0x2491', 'ecc': ''}}}},
+               remove_missing=False)
+    assert p.sec('linking').find('set-x.list.a').child('ecc') is None
+
+
+_DABMUX = shutil.which('odr-dabmux')
+
+
+@pytest.mark.skipif(_DABMUX is None, reason='needs odr-dabmux')
+def test_dabmux_precheck_catches_bad_configs(tmp_path):
+    from odr_mux.validate import check_with_dabmux
+    good = (FIX / 'mpbnl' / 'conf.mux').read_text()
+    spi = tmp_path / 'output.dat'
+    spi.write_bytes(b'')
+    good = good.replace('/home/ryan/dab/local-SPI-generator/output/output.dat', str(spi))
+    assert check_with_dabmux(good, _DABMUX)['ok']
+    bad = check_with_dabmux(good.replace('        id 1\n', '        id auto\n', 1), _DABMUX)
+    assert not bad['ok'] and 'hexparse' in bad['message']

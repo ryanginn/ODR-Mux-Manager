@@ -22,7 +22,7 @@ def env(tmp_path):
     cfg = dict(cfgmod.DEFAULTS)
     cfg.update(_path=str(tmp_path / 'config.json'), state_dir=str(state), project_root=str(root),
                mux_path=str(root / 'conf.mux'), supervisor_paths=[str(root / 'supervisor' / 'odr-encoders.conf')],
-               run_commands=False, check_fs=False)
+               run_commands=False, check_fs=False, validate_with_dabmux=False)
     db.init(str(state / 'manager.db'))
     (state / 'setup-token').write_text('tok123')
     ws = Workspace(cfg)
