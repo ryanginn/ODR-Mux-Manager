@@ -621,12 +621,37 @@ const pokeStatus = () => refreshStatus();
 
 function codecBadge(c) { return c ? h("span", { class: "codec " + c }, CODEC_LABEL[c] || c) : null; }
 
+// One plain colour per station: picked from its id (so it doesn't change between refreshes) and
+// never the same as the segment next to it.
+const STATION_COLOURS = ["#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#a855f7", "#14b8a6", "#ec4899", "#eab308",
+  "#06b6d4", "#84cc16", "#6366f1", "#f97316", "#10b981", "#e11d48", "#8b5cf6", "#0ea5e9"];
+function hashStr(t) { let x = 2166136261; for (const c of String(t)) { x ^= c.charCodeAt(0); x = Math.imul(x, 16777619); } return x >>> 0; }
+function stationColours(list) {
+  const out = {};
+  let prev = -1;
+  for (const s of list) {
+    let i = hashStr(s.id) % STATION_COLOURS.length;
+    if (i === prev) i = (i + 1) % STATION_COLOURS.length;
+    out[s.id] = STATION_COLOURS[i];
+    prev = i;
+  }
+  return out;
+}
+S.colours = {};
+// the CSP forbids inline style attributes, so set the colour through the CSSOM
+function stDot(id) { const d = h("i", { class: "st-dot" }); d.style.background = S.colours[id] || "var(--border-strong)"; return d; }
+
 function cuBar(total, segs, draftUsed, opts = {}) {
   const used = segs.reduce((a, s) => a + s.cu, 0);
+  const colours = stationColours(segs);
+  Object.assign(S.colours, colours);
   const bar = h("div", { class: "cubar" + (opts.big ? " big" : "") });
   for (const s of segs) {
-    const seg = h("i", { class: "seg " + (s.kind !== "audio" ? s.kind : (s.codec === "mp2" ? "mp2" : "aac")), title: `${s.label}: ${s.cu} CU (${s.bitrate} kbps ${s.protection || ""})` });
+    const data = s.kind !== "audio";
+    const seg = h("i", { class: "seg" + (data ? " data" : ""), title: `${s.label}: ${s.cu} CU (${s.bitrate} kbps ${s.protection || ""})${data ? " · data" : ""}` });
     seg.style.width = (100 * s.cu / total) + "%";
+    seg.style.setProperty("--c", colours[s.id]);
+    if (opts.big && s.cu / total > 0.045) seg.appendChild(h("span", { class: "seg-label" }, s.shortlabel || s.label || ""));
     bar.appendChild(seg);
   }
   if (draftUsed != null && draftUsed !== used) {
@@ -642,9 +667,8 @@ function cuBar(total, segs, draftUsed, opts = {}) {
       h("span", { class: "cu-num" }, h("b", null, used), ` / ${total}`),
       draftUsed != null && draftUsed !== used ? h("span", { class: "chip amber" }, `${draftUsed} after apply`) : null),
     bar,
-    h("div", { class: "row small muted" }, h("span", { class: "lg-key aac" }), "DAB+", h("span", { class: "lg-key mp2" }), "MP2",
-      h("span", { class: "lg-key data" }), "Data", h("span", { class: "lg-key dmb" }), "DMB", h("span", { class: "lg-key pending" }), "Unapplied",
-      h("span", { class: "spacer" }), `${total - used} CU free`));
+    h("div", { class: "row small muted" }, h("span", { class: "lg-key solid" }), "Station", h("span", { class: "lg-key data" }), "Data service",
+      h("span", { class: "lg-key pending" }), "Unapplied", h("span", { class: "spacer" }), `${total - used} CU free`));
 }
 
 function dbToPct(db) { if (db == null) return 0; return Math.max(0, Math.min(100, (db + 60) / 60 * 100)); }
@@ -682,6 +706,7 @@ async function pageMonitor(root, parts) {
   setCrumbs("On air");
   if (!S.configured) return isAdmin() ? pageImport(root) : pageNotConfigured(root);
   let ov = await api("GET", "/api/overview");
+  Object.assign(S.colours, stationColours(ov.cu_segments || ov.stations));
   const head = h("div");
   const grid = h("div", { class: "mon-grid" });
   const search = h("input", { type: "search", placeholder: "Search stations", value: monFilter.q, "aria-label": "Search" });
@@ -753,7 +778,7 @@ function monCard(s) {
   const alerts = h("div", { class: "row wrap tight" });
   const el = h("button", { class: "station-card mon-card", type: "button", onclick: () => monDetail(s, () => last) },
     h("div", { class: "sc-head" },
-      h("div", { class: "titles" }, h("h3", { class: "ellipsis" }, s.label || "(no label)"),
+      h("div", { class: "titles" }, h("h3", { class: "ellipsis" }, stDot(s.id), s.label || "(no label)"),
         h("div", { class: "sub" }, s.kind === "audio" ? [codecBadge(s.codec), ` ${s.bitrate} kbps`, s.protection ? ` · ${s.protection}` : "", s.cu != null ? ` · ${s.cu} CU` : ""] : [h("span", { class: "codec data" }, s.kind.toUpperCase()), ` ${s.bitrate} kbps`])),
       h("span", { class: "pos mono" }, s.ptag || ("#" + s.position))),
     s.kind === "audio" ? h("div", { class: "mon-body" }, h("div", { class: "grow stack tight" }, meters, dls), slide) : h("div", { class: "small muted" }, s.inputuri || ""),

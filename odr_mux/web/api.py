@@ -247,7 +247,7 @@ def overview():
            'cu_total': TOTAL_CU, 'cu_used': live.cu_used(), 'cu_draft': draft.cu_used(),
            'stations': [_station_public(s, u) for s in sts]}
     if is_viewer(u):
-        out['cu_segments'] = [{'id': s['id'], 'label': s['label'], 'cu': s['cu'], 'kind': s['kind'],
+        out['cu_segments'] = [{'id': s['id'], 'label': s['label'], 'shortlabel': s.get('shortlabel'), 'cu': s['cu'], 'kind': s['kind'],
                                'codec': s['codec'], 'protection': s['protection'], 'bitrate': s['bitrate']}
                               for s in live.stations()]
         out['cu_segments_draft'] = [{'id': s['id'], 'label': s['label'], 'cu': s['cu'], 'kind': s['kind']}
