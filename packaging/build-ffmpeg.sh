@@ -42,5 +42,6 @@ tar -xf "$WORK/ffmpeg.tar.xz" -C "$WORK"
       --disable-doc --disable-ffplay --disable-debug >/dev/null && \
   make -j"$JOBS" >/dev/null && make install >/dev/null )
 
-"$PREFIX/bin/ffmpeg" -hide_banner -encoders 2>/dev/null | grep -q libfdk_aac || { echo "build finished but libfdk_aac is missing" >&2; exit 1; }
+ENCODERS="$("$PREFIX/bin/ffmpeg" -hide_banner -encoders 2>/dev/null || true)"   # no early-exit grep: SIGPIPE + pipefail
+case "$ENCODERS" in *libfdk_aac*) ;; *) echo "build finished but libfdk_aac is missing" >&2; exit 1 ;; esac
 echo "Done: $PREFIX/bin/ffmpeg (libx264 + libfdk_aac). It is not on the system PATH."
