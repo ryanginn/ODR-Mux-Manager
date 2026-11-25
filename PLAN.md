@@ -110,6 +110,50 @@ uses the same stack and look.
 8. **DMB (experimental, last phase).** See the DMB section below.
 9. **Settings, users, backups/history, audit log.**
 
+## DAB (MP2) and DAB+ side by side
+
+A mux can mix MP2 and DAB+ stations, so each station has a **codec** setting:
+
+| Codec | Subchannel | Encoder flags |
+| :-- | :-- | :-- |
+| DAB+ AAC-LC | `type dabplus` | `--aaclc` (or no profile flag) |
+| DAB+ HE-AAC v1 | `type dabplus` | `--sbr` |
+| DAB+ HE-AAC v2 | `type dabplus` | `--ps` |
+| **DAB (MP2)** | `type audio` | `--dab`, `--dabmode`, `--dabpsy` |
+
+Encoder settings by codec:
+
+- **MP2 options:**
+  - **Channel mode** (`--dabmode`): stereo `s`, joint stereo `j`, dual mono `d`, mono `m`.
+    The default is `j` for stereo and `m` for mono.
+  - **Psychoacoustic model** (`--dabpsy`): 0, 1, 2 or 3. The encoder's default is 1;
+    your stations use 2.
+  - **Sample rate:** 48 kHz, or 24 kHz for low-sampling-frequency mode (LSF).
+- **DAB+ options:** afterburner on/off, bandwidth, and sample rate 32 or 48 kHz.
+- **Shown for every codec:** PAD length, with a hint about how much space it leaves for the
+  slideshow, plus silence timeout, drift compensation, ICY text, and the stats socket.
+
+Protection and CU:
+
+- **MP2 uses UEP** by default: `protection-profile UEP`, levels 1–5. The CU count comes
+  from the UEP table (ETSI EN 300 401, Table 6) for each bitrate and level. Some
+  bitrate/level pairs don't exist, and the editor greys those out.
+- MP2 can also be set to EEP-A/B.
+- On the monitor and CU bar, each station shows a codec badge (`MP2` / `AAC` / `HE` /
+  `HEv2`) next to its bitrate.
+
+Example: MP2 at 128 kbps with UEP level 3 = 96 CU, versus 60 CU for DAB+ at 128 kbps with
+EEP-4B. The CU bar shows what switching a station's codec would free up or cost.
+
+## Secrets in stream URLs
+
+Some source URLs carry credentials, such as a stream key in the query string:
+
+- These parts are **masked in the UI**, except to admins who click to reveal.
+- They are never sent to Viewer or Station-monitor users.
+- They are left out of the audit log and the diff preview (shown as `•••`).
+- Backups keep them, so backup files are only readable by the service user.
+
 ## DMB
 
 What current ODR-DabMux does (checked against the latest source, June 2026):
@@ -160,6 +204,11 @@ that a software decoder accepts, using a test receiver that we'll pick when we g
 - An option is stuck on the wrong line (`--silence=60` on the `--gst-uri` line).
 - A DAB linkage entry points at the set's own key service (`mpb2-dab-5a` → 0x2492).
 - An EEP-B bitrate that isn't a multiple of 32; duplicate ports, SIds or subchannel IDs.
+- Codec mismatch between encoder and subchannel: `--dab` with `type dabplus`, or a DAB+
+  encoder with `type audio`.
+- Bitrate mismatch between the encoder and the subchannel.
+- MP2 bitrate/UEP level pair that isn't valid.
+- `--dabpsy` / `--dabmode` set on a DAB+ encoder, or `--sbr` / `--ps` on an MP2 one.
 
 ## Build order
 
