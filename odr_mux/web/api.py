@@ -652,7 +652,7 @@ def check_dabmux():
 @require('editor')
 def fix_checks():
     fix = json_body().get('fix')
-    if fix not in ('repair-labels', 'fix-log-names', 'drop-empty', 'fix-subch-ids'):
+    if fix not in ('repair-labels', 'fix-log-names', 'drop-empty', 'fix-subch-ids', 'sync-encoder-bitrate'):
         raise ApiError('Unknown fix.')
     changed = []
 

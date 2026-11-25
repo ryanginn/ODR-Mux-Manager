@@ -502,17 +502,24 @@ def set_feed(p: Project, key, feed: str, opts: dict):
         if st['feed'] != 'local':
             raise OpError('station is already fed externally')
         parked = {'programs': [], 'ptag': st['ptag'], 'port': st['port']}
-        for name in (st['pad_program'], st['audio_program']):
-            if not name:
-                continue
-            sec = p.program(name)
-            tmp = SupervisorFile('')
-            tmp.sections.append(sec)
-            idx = sec.file.sections.index(sec)
-            prev = sec.file.sections[idx - 1].name if idx > 0 else None
-            parked['programs'].append({'file': sec.file.path if sec.file else None, 'text': tmp.dumps(),
-                                       'name': name, 'after': prev})
-            sec.file.remove_section(sec)
+        # park every encoder feeding this station: when more than one odr-audioenc sends to the
+        # port (an old copy, a backup), parking only the first leaves the next one matched and the
+        # station still looks locally fed
+        cur = st
+        for _ in range(16):
+            if cur is None or cur['feed'] != 'local' or not cur['audio_program']:
+                break
+            for name in (cur['pad_program'], cur['audio_program']):
+                sec = p.program(name) if name else None
+                if sec is None or sec.file is None:
+                    continue
+                tmp = SupervisorFile('')
+                tmp.sections.append(sec)
+                idx = sec.file.sections.index(sec)
+                prev = sec.file.sections[idx - 1].name if idx > 0 else None
+                parked['programs'].append({'file': sec.file.path, 'text': tmp.dumps(), 'name': name, 'after': prev})
+                sec.file.remove_section(sec)
+            cur = p.station(key)
         p.parked[st['id']] = parked
         proto = opts.get('proto') or sc.get('inputproto') or 'edi'
         port = int(opts.get('port') or st['port'] or next_port(p))
@@ -559,6 +566,16 @@ def set_feed(p: Project, key, feed: str, opts: dict):
                 a.set_all('edi', [f'tcp://127.0.0.1:{st2["port"]}'])
                 a.set_all('output', [v for v in a.get_all('output') if not is_local(parse_tcp(v)[0])])
                 prog.argv = a.to_argv()
+            # the bitrate may have changed while the station was fed externally: the restored
+            # encoder must match the subchannel again
+            br = parse_int(sc.get('bitrate'))
+            for prog in (p.program(x['name']) for x in parked['programs']):
+                if prog is None or tool_of(prog.argv) != 'audioenc':
+                    continue
+                a = Args.parse(prog.argv)
+                if br and a.get('bitrate') is not None and parse_int(a.get('bitrate')) != br:
+                    a.set('bitrate', str(br))
+                    prog.argv = a.to_argv()
             return fs
         ptag = (parked or {}).get('ptag') or next_ptag(p)
         enc = dict(opts.get('encoder') or {})

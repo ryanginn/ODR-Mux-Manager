@@ -123,6 +123,32 @@ def test_feed_flip_roundtrip_is_exact():
             assert t0['mux'] == t1['mux'] and t0['sups'] == t1['sups'], st['label']
 
 
+def test_feed_external_parks_every_encoder_on_the_port_and_restores_bitrate():
+    from odr_mux.supervisor_conf import SupervisorFile
+    p = Project.load(MPBNL)
+    st = next(s for s in p.stations() if s['feed'] == 'local')
+    orig = p.program(st['audio_program'])
+    # a second (old) encoder sending to the same port at another bitrate
+    tmp = SupervisorFile('')
+    tmp.sections.append(orig)
+    a = Args.parse(orig.argv)
+    a.set('bitrate', '96')
+    for sec in SupervisorFile(tmp.dumps().replace(f'[program:{orig.program}]', f'[program:{orig.program}-old]')).sections:
+        sec.file = orig.file
+        sec.argv = a.to_argv()
+        orig.file.sections.append(sec)
+    ops.set_feed(p, st['id'], 'external', {})
+    s2 = p.station(st['id'])
+    assert s2['feed'] == 'external' and s2['encoder'] is None
+    assert not any(e['code'] == 'bitrate-mismatch' for e in checker.check(p, check_fs=False))
+    # the bitrate changes while external; switching back brings the encoders back at the new rate
+    ops.update_station(p, st['id'], {'subchannel': {'bitrate': '160'}})
+    ops.set_feed(p, st['id'], 'local', {})
+    for prog in (orig.program, orig.program + '-old'):
+        assert Args.parse(p.program(prog).argv).get('bitrate') == '160'
+    assert not any(e['code'] == 'bitrate-mismatch' for e in checker.check(p, check_fs=False))
+
+
 def test_add_mp2_station_with_psy_model():
     p = Project.load(MPBNL)
     r = ops.add_station(p, {'label': 'Test FM', 'sid': '0x24FF', 'codec': 'mp2', 'bitrate': 128,
