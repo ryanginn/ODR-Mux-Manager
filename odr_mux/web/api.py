@@ -645,10 +645,29 @@ def discard_draft():
     return jsonify(ok=True)
 
 
+@bp.get('/api/apply/progress')
+@require('viewer')
+def apply_progress():
+    pr = dict(ws().progress)
+    pr['now'] = time.time()
+    return jsonify(pr)
+
+
 @bp.post('/api/apply')
 @require('editor')
 def apply():
     _need_project()
+    if ws().progress.get('running'):
+        raise ApiError('An Apply or rollback is already running.', 409)
+    ws().begin('apply')
+    try:
+        return _apply()
+    finally:
+        ws().end()
+
+
+def _apply():
+    ws().step('Checking the config')
     p = ws().draft()
     body = json_body()
     dabmux_note = None
@@ -660,6 +679,7 @@ def apply():
     if cfg().get('validate_with_dabmux', True) and ws().live().texts()['mux'] != p.texts()['mux']:
         from ..validate import check_with_dabmux
         dm = (capabilities.detect(cfg()).get('tools') or {}).get('odr-dabmux')
+        ws().step('Test-running odr-dabmux on the new config')
         v = check_with_dabmux(p.texts()['mux'], dm)
         if v.get('skipped'):
             dabmux_note = v['message']
@@ -714,10 +734,15 @@ def backup_diff(bid):
 @bp.post('/api/backups/<bid>/rollback')
 @require('editor')
 def rollback(bid):
+    if ws().progress.get('running'):
+        raise ApiError('An Apply or rollback is already running.', 409)
+    ws().begin('rollback')
     try:
         res = ws().rollback(bid, current_user()['username'])
     except FileNotFoundError:
         raise ApiError('Backup not found.', 404)
+    finally:
+        ws().end()
     audit('rollback', bid, {'ok': res['ok']})
     return jsonify(res), (200 if res['ok'] else 500)
 

@@ -1501,6 +1501,39 @@ async function pageChecks(root) {
 
 /* ============================== changes / apply / history ============================== */
 
+// Shows live progress of an Apply/rollback while `promise` runs. Returns the promise's result.
+async function withProgress(title, promise) {
+  const stepsEl = h("div", { class: "steps-list" });
+  const clock = h("span", { class: "muted mono" }, "0s");
+  const body = h("div", { class: "stack" },
+    h("div", { class: "row" }, h("span", { class: "spin" }), h("b", { class: "grow" }, "Working…"), clock),
+    stepsEl, h("p", { class: "small muted" }, "Keep this page open. The mux keeps running while the files are written; with a full supervisor restart every station drops for a few seconds."));
+  const back = h("div", { class: "modal-back" });
+  back.appendChild(h("div", { class: "modal", role: "dialog", "aria-modal": "true" }, h("div", { class: "modal-head" }, h("h2", null, title)), h("div", { class: "modal-body" }, body)));
+  document.body.appendChild(back);
+  const t0 = Date.now();
+  let stop = false;
+  const tick = async () => {
+    if (stop) return;
+    clock.textContent = `${Math.round((Date.now() - t0) / 1000)}s`;
+    try {
+      const pr = await api("GET", "/api/apply/progress", undefined, { quiet: true });
+      if (pr.started && pr.steps) {
+        clear(stepsEl);
+        pr.steps.forEach((st, i) => {
+          const last = i === pr.steps.length - 1 && pr.running;
+          stepsEl.appendChild(h("div", { class: "step-row" + (last ? " active" : "") },
+            last ? h("span", { class: "spin" }) : icon("check"), h("span", { class: "grow" }, st.text),
+            h("span", { class: "muted mono small" }, last ? `${Math.round(pr.now - st.ts)}s` : (st.secs != null ? `${st.secs}s` : ""))));
+        });
+      }
+    } catch (e) { /* the server may be busy restarting things */ }
+    if (!stop) setTimeout(tick, 700);
+  };
+  tick();
+  try { return await promise; } finally { stop = true; back.remove(); }
+}
+
 async function pageChanges(root) {
   setCrumbs("Changes & history");
   const [d, b] = await Promise.all([api("GET", "/api/draft"), api("GET", "/api/backups")]);
@@ -1508,7 +1541,7 @@ async function pageChanges(root) {
   const fsOps = (d.fs || []).filter((o) => o.op !== "stop_program");
   const apply = async (force = false) => {
     try {
-      const r = await api("POST", "/api/apply", { force }, { quiet: true });
+      const r = await withProgress("Applying", api("POST", "/api/apply", { force }, { quiet: true }));
       showResult(r);
     } catch (e) {
       if (e.status === 409) {
@@ -1546,7 +1579,7 @@ async function pageChanges(root) {
       h("tbody", null, b.backups.length ? b.backups.map((x) => h("tr", null, h("td", null, fmtDate(x.ts)), h("td", null, x.user || ""), h("td", { class: "small mono" }, x.files.map((f) => f.split("/").pop()).join(", "),
         x.rolled_back ? h("span", { class: "chip amber" }, "rolled back") : null),
         h("td", { class: "nowrap" }, btn("Compare", { cls: "sm ghost", onclick: async () => { const r = await api("GET", `/api/backups/${x.id}/diff`); modal({ title: `Now vs backup ${x.id}`, wide: true, body: r.files.length ? h("div", { class: "stack" }, r.files.map((f) => h("details", { open: true }, h("summary", { class: "mono" }, f.path), diffView(f.diff)))) : h("p", null, "Identical to the current files.") }); } }),
-          isEditor() ? btn("Roll back", { cls: "sm danger ghost", onclick: async () => { if (await confirmDialog(`Restore the files as they were before ${fmtDate(x.ts)}? Folder moves made by that apply are undone too, and supervisor/odr-dabmux are reloaded.`, { danger: true, okText: "Roll back" })) { const r = await api("POST", `/api/backups/${x.id}/rollback`, {}); showResult(r); } } }) : null))) :
+          isEditor() ? btn("Roll back", { cls: "sm danger ghost", onclick: async () => { if (await confirmDialog(`Restore the files as they were before ${fmtDate(x.ts)}? Folder moves made by that apply are undone too, and supervisor/odr-dabmux are reloaded.`, { danger: true, okText: "Roll back" })) { const r = await withProgress("Rolling back", api("POST", `/api/backups/${x.id}/rollback`, {})); showResult(r); } } }) : null))) :
         h("tr", null, h("td", { colspan: 4, class: "muted" }, "No backups yet. One is made on every Apply.")))))));
 }
 
