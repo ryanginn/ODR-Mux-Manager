@@ -1690,6 +1690,7 @@ async function pageSettings(root) {
       h("dl", { class: "kv" }, h("dt", null, "odr-audioenc"), h("dd", null, caps.audioenc ? `${caps.audioenc.version || ""} · inputs: ${caps.inputs.join(", ") || "none"}` : "not found"),
         h("dt", null, "odr-dabmux"), h("dd", null, caps.dabmux ? caps.dabmux.version : "not found"), h("dt", null, "ffmpeg"), h("dd", null, caps.ffmpeg ? `found${caps.ffmpeg.libx264 ? " · libx264" : ""}${caps.ffmpeg.he_aac ? " · libfdk_aac" : ""}` : "not found")),
       h("div", { class: "grid-2" }, tools.map(([t, i]) => field(`${t} path`, i)))),
+    updatesCard(),
     h("div", { class: "row mt" }, h("span", { class: "spacer" }), btn("Save settings", { cls: "primary", onclick: async () => {
       try {
         await api("PUT", "/api/settings", { supervisor_socket: sock.value, supervisorctl: ctl.value, supervisor_conf: sconf.value, dabmux_restart: restart.value || "auto", run_commands: run.box.checked,
@@ -1701,6 +1702,57 @@ async function pageSettings(root) {
     } })));
   const m = location.hash.match(/#\/settings\/confirm\/(.+)$/);
   if (m) { try { await api("POST", "/api/network/confirm", { token: m[1] }); toast("New address confirmed.", "ok"); location.hash = "#/settings"; } catch (e) { /* toasted */ } }
+}
+
+/* ============================== updates ============================== */
+
+function updatesCard() {
+  const body = h("div", { class: "stack" });
+  const card = h("div", { class: "card card-pad stack mt" }, h("h3", null, "Updates"), body);
+  let timer = null, wasRunning = false, startCommit = null;
+  const draw = (u) => {
+    const st = u.status || {};
+    const running = u.pending || st.state === "running";
+    const short = (c) => (c ? c.slice(0, 7) : "unknown");
+    put(clear(body),
+      h("dl", { class: "kv" },
+        h("dt", null, "Installed"), h("dd", { class: "mono" }, `${u.version} (${short(u.commit)})`),
+        h("dt", null, "Source"), h("dd", { class: "mono" }, u.configured ? `${u.repo} · ${u.branch}` : "not a git install"),
+        st.checked_at ? [h("dt", null, "Last check"), h("dd", null, fmtAgo(st.checked_at))] : null),
+      !u.configured ? h("div", { class: "banner amber" }, icon("info"), h("div", { class: "grow" }, "Updates from here need an install made from a git checkout: ", h("code", null, "git clone … && sudo ./install.sh"), ".")) :
+        h("div", { class: "stack tight" },
+          running ? h("div", { class: "banner blue" }, h("span", { class: "spin" }), h("div", { class: "grow" }, st.message || "Waiting for the updater…")) :
+            st.state === "error" ? h("div", { class: "banner red" }, icon("alert"), h("div", { class: "grow" }, st.message)) :
+            st.message ? h("div", { class: "banner " + (st.available ? "amber" : "green") }, icon(st.available ? "arrowUp" : "check"),
+              h("div", { class: "grow" }, st.message, st.available && st.remote_commit ? ` (${short(st.remote_commit)})` : "")) : null,
+          h("p", { class: "small muted" }, "Updating downloads the latest version from the source above and re-runs the installer with your current settings. The web UI restarts (the mux and encoders keep running); this page reconnects by itself."),
+          h("div", { class: "row" }, h("span", { class: "spacer" }),
+            btn("Check for updates", { icon: "refresh", disabled: running, onclick: () => req("check") }),
+            btn("Update now", { cls: "primary", icon: "arrowUp", disabled: running || (st.remote_commit && !st.available && st.remote_commit === u.commit), onclick: async () => {
+              if (await confirmDialog("Download and install the latest version? The web UI restarts for a moment; the mux keeps running.", { okText: "Update now" })) req("apply");
+            } }))));
+  };
+  const load = async () => {
+    let u;
+    try { u = await api("GET", "/api/updates", undefined, { quiet: true }); }
+    catch (e) { // service restarting during an update
+      put(clear(body), h("div", { class: "banner blue" }, h("span", { class: "spin" }), "Installing; the web UI is restarting…"));
+      timer = setTimeout(load, 2000); return;
+    }
+    if (startCommit === null) startCommit = u.commit;
+    const running = u.pending || (u.status && u.status.state === "running");
+    draw(u);
+    if (wasRunning && !running) {
+      if (u.commit !== startCommit) { toast("Updated. Reloading…", "ok"); setTimeout(() => location.reload(), 1200); return; }
+    }
+    wasRunning = running;
+    if (running && document.body.contains(card)) timer = setTimeout(load, 1500);
+  };
+  const req = async (action) => {
+    try { await api("POST", "/api/updates", { action }); wasRunning = true; load(); } catch (e) { /* toasted */ }
+  };
+  load();
+  return card;
 }
 
 /* ============================== audit / account ============================== */

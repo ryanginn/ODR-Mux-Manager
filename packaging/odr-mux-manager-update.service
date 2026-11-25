@@ -1,0 +1,10 @@
+[Unit]
+Description=MPBNL Multiplex WebFrontend updater
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/odr-mux-manager-update
+TimeoutStartSec=45min
+PrivateTmp=yes

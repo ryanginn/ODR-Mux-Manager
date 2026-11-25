@@ -82,6 +82,15 @@ libfdk_aac is "nonfree": that binary may be used but not redistributed.
 Supervisor access: the service user must be able to use `/var/run/supervisor.sock`. Set
 `chmod=0770` and `chown=root:<group>` under `[unix_http_server]` in `supervisord.conf`.
 
+## Updating
+
+**Settings → Updates** has *Check for updates* and *Update now* (admins only). It needs an install made
+from a git checkout. The web UI only drops a request file; a root-only systemd path unit
+(`odr-mux-manager-update.path`) runs `/usr/local/sbin/odr-mux-manager-update`. That fetches the
+repository and branch recorded at install time (root-owned `/etc/odr-mux-manager/update.conf`, not
+changeable from the UI) and re-runs `install.sh --yes`, which keeps your current settings. The mux and
+encoders keep running; only the web UI restarts. From a shell: `sudo odr-mux-manager-update check|apply`.
+
 ## Ports it uses or reads
 
 | What | Default |

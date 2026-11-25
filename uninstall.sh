@@ -4,8 +4,10 @@
 set -euo pipefail
 APP=odr-mux-manager
 [ "$(id -u)" -eq 0 ] || { echo "run as root" >&2; exit 1; }
-systemctl disable --now "$APP" 2>/dev/null || true
-rm -f /etc/systemd/system/$APP.service /usr/local/bin/$APP /etc/sudoers.d/$APP
+systemctl disable --now "$APP" "$APP-update.path" 2>/dev/null || true
+rm -f /etc/systemd/system/$APP.service /etc/systemd/system/$APP-update.service /etc/systemd/system/$APP-update.path \
+      /usr/local/bin/$APP /usr/local/sbin/$APP-update /etc/sudoers.d/$APP
+rm -rf /var/lib/$APP-update
 systemctl daemon-reload
 rm -rf /opt/$APP
 if [ "${1:-}" = "--purge" ]; then

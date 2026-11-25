@@ -1044,3 +1044,53 @@ def dmb_add():
     data = json_body()
     res = _edit(lambda p: dmb.add_dmb_service(p, data, cfg()), f'add DMB service {data.get("label")}')
     return jsonify(ok=True, station=res['station'])
+
+
+# ===================================================================== updates (Settings -> Updates)
+UPDATE_STATUS = '/var/lib/odr-mux-manager-update/status.json'
+UPDATE_CONF = '/etc/odr-mux-manager/update.conf'
+COMMIT_FILE = '/opt/odr-mux-manager/COMMIT'
+
+
+def _read(path, limit=65536):
+    try:
+        with open(path) as f:
+            return f.read(limit)
+    except OSError:
+        return None
+
+
+@bp.get('/api/updates')
+@require('admin')
+def update_status():
+    import json as _json
+    conf = _read(UPDATE_CONF) or ''
+    kv = dict(l.split('=', 1) for l in conf.splitlines() if '=' in l)
+    repo = kv.get('REPO_URL', '')
+    repo = re.sub(r'^[a-z+]+://([^/@]*@)?', '', repo)        # never show credentials
+    st = None
+    raw = _read(UPDATE_STATUS)
+    if raw:
+        try:
+            st = _json.loads(raw)
+        except ValueError:
+            st = None
+    pending = os.path.exists(os.path.join(cfg()['state_dir'], 'update-request'))
+    return jsonify(configured=bool(kv.get('REPO_URL') and kv.get('BRANCH')), repo=repo, branch=kv.get('BRANCH'),
+                   version=__version__, commit=(_read(COMMIT_FILE) or '').strip() or None, status=st, pending=pending)
+
+
+@bp.post('/api/updates')
+@require('admin')
+def request_update():
+    action = json_body().get('action')
+    if action not in ('check', 'apply'):
+        raise ApiError('action must be check or apply.')
+    if not os.path.exists(UPDATE_CONF):
+        raise ApiError('Updates are not set up: install from a git checkout (git clone ... && sudo ./install.sh).', 409)
+    path = os.path.join(cfg()['state_dir'], 'update-request')
+    # the request only says check/apply; what gets installed comes from root-owned update.conf
+    with open(path, 'w') as f:
+        f.write(action + '\n')
+    audit('update.' + action)
+    return jsonify(ok=True)
