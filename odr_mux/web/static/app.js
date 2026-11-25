@@ -646,27 +646,45 @@ function cuBar(total, segs, draftUsed, opts = {}) {
   const colours = stationColours(segs);
   Object.assign(S.colours, colours);
   const bar = h("div", { class: "cubar" + (opts.big ? " big" : "") });
+  // one floating tooltip per bar, centred horizontally on the mouse pointer
+  const tip = h("div", { class: "cu-tip" });
+  const track = h("div", { class: "cu-track" }, tip, bar);
+  const showTip = (ev, parts) => {
+    clear(tip).append(...parts);
+    tip.classList.add("on");
+    const r = track.getBoundingClientRect();
+    const half = tip.offsetWidth / 2;
+    const x = Math.max(half, Math.min(r.width - half, ev.clientX - r.left));
+    tip.style.left = x + "px";
+  };
+  bar.addEventListener("mouseleave", () => tip.classList.remove("on"));
+  const sep = () => h("span", { class: "cu-tip-sep" });
   for (const s of segs) {
     const data = s.kind !== "audio";
-    const seg = h("i", { class: "seg" + (data ? " data" : ""), title: `${s.label}: ${s.cu} CU (${s.bitrate} kbps ${s.protection || ""})${data ? " · data" : ""}` });
+    const seg = h("i", { class: "seg" + (data ? " data" : "") });
     seg.style.width = (100 * s.cu / total) + "%";
     seg.style.setProperty("--c", colours[s.id]);
+    const sid = String(s.id || "").startsWith("sub:") ? "" : s.id;
+    const parts = () => [h("span", { class: "cu-tip-k" }, s.kind === "data" ? "Data:" : "Service:"), h("b", null, s.label || "Unnamed"), sep(),
+      h("span", { class: "cu-tip-cu" }, `${s.cu} CU`), sep(), h("span", { class: "cu-tip-k" }, "SID:"), h("span", { class: "mono" }, sid ? "0x" + sid : "")];
+    seg.addEventListener("mousemove", (ev) => showTip(ev, parts()));
     if (opts.big && s.cu / total > 0.045) seg.appendChild(h("span", { class: "seg-label" }, s.shortlabel || s.label || ""));
     bar.appendChild(seg);
   }
   if (draftUsed != null && draftUsed !== used) {
     const diff = draftUsed - used;
-    const seg = h("i", { class: "seg pending" + (diff < 0 ? " neg" : ""), title: `Unapplied: ${diff > 0 ? "+" : ""}${diff} CU` });
+    const seg = h("i", { class: "seg pending" + (diff < 0 ? " neg" : "") });
     seg.style.width = (100 * Math.abs(diff) / total) + "%";
     if (diff < 0) seg.style.marginLeft = (-100 * Math.abs(diff) / total) + "%";
+    seg.addEventListener("mousemove", (ev) => showTip(ev, [h("span", { class: "cu-tip-k" }, "Unapplied:"), h("b", null, `${diff > 0 ? "+" : ""}${diff} CU`)]));
     bar.appendChild(seg);
   }
   const over = Math.max(used, draftUsed || 0) > total;
   return h("div", { class: "cu-wrap" + (over ? " over" : "") },
     h("div", { class: "row" }, icon("activity"), h("b", null, "Capacity (CU)"), h("span", { class: "spacer" }),
-      h("span", { class: "cu-num" }, h("b", null, used), ` / ${total}`),
-      draftUsed != null && draftUsed !== used ? h("span", { class: "chip amber" }, `${draftUsed} after apply`) : null),
-    bar,
+      draftUsed != null && draftUsed !== used ? h("span", { class: "chip amber" }, `${draftUsed} after apply`) : null,
+      h("span", { class: "cu-num" }, h("b", null, used), ` / ${total}`)),
+    track,
     h("div", { class: "row small muted" }, h("span", { class: "lg-key solid" }), "Station", h("span", { class: "lg-key data" }), "Data service",
       h("span", { class: "lg-key pending" }), "Unapplied", h("span", { class: "spacer" }), `${total - used} CU free`));
 }
@@ -1381,20 +1399,16 @@ async function pageData(root) {
 
 async function dataEditor(s) {
   const ro = !isEditor();
-  let all = [], attached = [];
+  let attached = [];
   try {
-    all = (await api("GET", "/api/stations")).stations.filter((x) => x.kind === "audio" && x.service_uid);
     if (s) attached = (await api("GET", `/api/data-services/${encodeURIComponent(s.id)}/attached`)).attached;
   } catch (e) { /* toasted */ }
-  const attachBoxes = all.map((x) => [x.service_uid, toggle(x.label || x.service_uid, attached.includes(x.service_uid), { disabled: ro })]);
-  const attachField = h("div", { class: "field" },
-    h("div", { class: "label-row" }, h("label", null, "Also show under these stations"), h("span", { class: "spacer" }),
-      ro ? null : h("span", { class: "row tight" },
-        btn("All", { cls: "sm ghost", onclick: () => attachBoxes.forEach(([, t]) => { t.box.checked = true; }) }),
-        btn("None", { cls: "sm ghost", onclick: () => attachBoxes.forEach(([, t]) => { t.box.checked = false; }) }))),
-    h("div", { class: "list-check" }, attachBoxes.length ? attachBoxes.map(([, t]) => t.el) : h("span", { class: "muted small" }, "No audio stations.")),
-    h("div", { class: "hint" }, "Each ticked station gets this service as an extra component on the same packet address, so receivers playing that station offer it (e.g. Journaline news while the station plays)."));
-  const attachedValue = () => attachBoxes.filter(([, t]) => t.box.checked).map(([uid]) => uid);
+  // odr-dabmux can't share one component between services, so copies under stations stay empty on
+  // receivers: data services are standalone only. Saving removes any copies made earlier.
+  const attachField = attached.length ? h("div", { class: "banner amber" }, icon("alert"), h("div", { class: "grow" },
+    `This service is also listed under ${attached.length} station${attached.length === 1 ? "" : "s"}. Receivers leave those copies empty, so Save removes them and keeps it as a standalone service.`)) : null;
+  const attachedValue = () => [];
+  const datOut = h("div");   // .dat check results; must exist before `body` below uses it
   const c = (s && s.component) || {};
   const sc = (s && s.subchannel) || {};
   const svc = (s && s.service) || {};
@@ -1424,7 +1438,6 @@ async function dataEditor(s) {
     h("div", { class: "grid-2" }, field("Bitrate (kbps)", bitrate), field("Subchannel type", subtype)), prot.el,
     h("div", { class: "grid-3" }, field("Packet address", addr, { hint: "Must match the generator." }), field("DSCTy (component type)", dscty, { hint: "60 = MOT, 5 = TDC. Blank = preset." }), h("div", { class: "field" }, h("label", null, " "), dg.el)),
     field("User applications (FIG 0/13)", uap.el), field("figtype (only for apps without a name, e.g. TPEG 0x4)", fig), attachField, datOut);
-  const datOut = h("div");
   const foot = [btn("Close", { onclick: () => m.close() })];
   if (s) foot.unshift(btn("Check the .dat file", { cls: "ghost", icon: "search", onclick: async () => {
     put(clear(datOut), h("div", { class: "banner blue" }, h("span", { class: "spin" }), "Reading the file…"));

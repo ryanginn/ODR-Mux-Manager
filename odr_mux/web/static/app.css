@@ -560,3 +560,19 @@ details summary { cursor: pointer; padding: 6px 0; }
 .lg-key.data { background: repeating-linear-gradient(135deg, #a855f7 0 3px, transparent 3px 6px); border: 1px solid #a855f7; }
 .lg-key.pending { border: 2px dashed var(--amber); background: transparent; }
 .st-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; vertical-align: 1px; flex: none; font-style: normal; }
+
+/* capacity bar v2: rounded segments with small gaps, tooltip centred on the pointer */
+.cu-track { position: relative; padding: 2px 0; }
+.cubar, .cubar.big { background: var(--inset); border: 0; border-radius: 999px; gap: 3px; height: 14px; overflow: hidden; }
+.cubar.big { height: 16px; }
+.cubar .seg { border-right: 0; border-radius: 3px; }
+.cubar .seg:first-child { border-radius: 999px 3px 3px 999px; }
+.cubar .seg-label { display: none; }
+.cu-tip { position: absolute; bottom: calc(100% + 8px); left: 0; transform: translateX(-50%); display: flex; align-items: center; gap: 8px;
+  white-space: nowrap; padding: 6px 12px; border-radius: 10px; font-size: 13px; background: var(--card-2); color: var(--text);
+  border: 1px solid var(--border-strong); box-shadow: 0 6px 18px rgba(0,0,0,.35); pointer-events: none; opacity: 0;
+  transition: opacity .12s; z-index: 20; }
+.cu-tip.on { opacity: 1; }
+.cu-tip-k { color: var(--accent-2); font-weight: 650; }
+.cu-tip-cu { color: var(--green); font-weight: 650; }
+.cu-tip-sep { width: 1px; height: 14px; background: var(--border-strong); }
