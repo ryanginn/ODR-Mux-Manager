@@ -132,6 +132,21 @@ class Project:
     def cu_used(self) -> int:
         return sum(self.subch_cu(sc) for sc in self.subchannels())
 
+    def effective_subch_ids(self) -> Dict[str, Optional[int]]:
+        """Subchannel id per uid as odr-dabmux will use it. A subchannel without `id` gets the lowest
+        id from 1 up that no *earlier* subchannel uses (it holds 0 itself while searching, so never 0)."""
+        out: Dict[str, Optional[int]] = {}
+        taken = []
+        for sc in self.subchannels():
+            v = sc.get('id')
+            if v is not None:
+                i = parse_int(v)
+            else:
+                i = next((k for k in range(1, 64) if k not in taken), None)
+            out[sc.key] = i
+            taken.append(i)
+        return out
+
     def subch_port(self, sc: Node):
         proto = (sc.get('inputproto') or '').lower()
         uri = sc.get('inputuri') or ''

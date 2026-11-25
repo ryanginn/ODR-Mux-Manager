@@ -103,9 +103,20 @@ def check(project: Project, check_fs: bool = False, manager_port: int | None = N
             f = sc.get('inputuri') or ''
             if f and not Path(f).exists():
                 out.append(_issue('warning', 'data-file', f'{sc.key}: input file {f} does not exist (yet).', subchannel=sc.key))
-    for i, n in ids.items():
-        if n > 1:
-            out.append(_issue('error', 'subch-id-dup', f'Subchannel id {i} is used {n} times.'))
+    eff = project.effective_subch_ids()
+    seen = {}
+    for uid, i in eff.items():
+        if i is None:
+            continue
+        if i in seen:
+            first = seen[i]
+            auto = [u for u in (first, uid) if project.subchannel(u).get('id') is None]
+            why = f' ({auto[0]} has no id line; odr-dabmux gives it {i} automatically)' if auto else ''
+            out.append(_issue('error', 'subch-id-dup', f'Subchannel id {i} is used by {first} and {uid}{why}. '
+                              f'odr-dabmux will refuse to start ("Subchannel {i} is set more than once").',
+                              fix='fix-subch-ids', subchannel=uid))
+        else:
+            seen[i] = uid
     for p, n in ports.items():
         if n > 1:
             out.append(_issue('error', 'port-dup', f'Input port {p} is used by {n} subchannels.'))
@@ -273,6 +284,23 @@ def apply_fix(project: Project, fix: str):
             if n.children is None and n.value is not None and n.value.strip() == '' and n.parent is not None:
                 n.parent.remove(n)
                 changed.append(_path(n) if n.parent else n.key)
+    elif fix == 'fix-subch-ids':
+        # give every subchannel without an id line its explicit (current automatic) id, then move
+        # later duplicates to free ids
+        eff = project.effective_subch_ids()
+        for sc in project.subchannels():
+            if sc.get('id') is None and eff.get(sc.key) is not None:
+                sc.set('id', str(eff[sc.key]))
+        used = set()
+        for sc in project.subchannels():
+            i = parse_int(sc.get('id'))
+            if i in used:
+                new = next(k for k in range(1, 64) if k not in used and k not in
+                           {parse_int(x.get('id')) for x in project.subchannels()})
+                sc.set('id', str(new))
+                changed.append(f'{sc.key}: id {i} -> {new}')
+                i = new
+            used.add(i)
     elif fix == 'fix-log-names':
         for p in project.programs():
             log = p.get('stdout_logfile')

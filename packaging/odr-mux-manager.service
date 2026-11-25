@@ -26,7 +26,8 @@ ProtectKernelLogs=yes
 ProtectControlGroups=yes
 ProtectClock=yes
 ProtectHostname=yes
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# AF_NETLINK: getifaddrs() - libzmq (inside odr-dabmux's config test-run) aborts without it
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 RestrictNamespaces=yes
 RestrictRealtime=yes
 LockPersonality=yes

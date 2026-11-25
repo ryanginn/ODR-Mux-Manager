@@ -229,7 +229,8 @@ def next_uid(existing: List[str], prefix: str, num: Optional[int] = None) -> str
 
 
 def free_subch_id(p: Project) -> int:
-    used = {parse_int(sc.get('id')) for sc in p.subchannels()}
+    # include ids odr-dabmux assigns itself to subchannels without an `id` line (e.g. an SPI subchannel)
+    used = set(p.effective_subch_ids().values())
     for i in list(range(1, 64)) + [0]:
         if i not in used:
             return i

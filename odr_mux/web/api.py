@@ -616,7 +616,7 @@ def check_dabmux():
 @require('editor')
 def fix_checks():
     fix = json_body().get('fix')
-    if fix not in ('repair-labels', 'fix-log-names', 'drop-empty'):
+    if fix not in ('repair-labels', 'fix-log-names', 'drop-empty', 'fix-subch-ids'):
         raise ApiError('Unknown fix.')
     changed = []
 
@@ -651,6 +651,7 @@ def apply():
     _need_project()
     p = ws().draft()
     body = json_body()
+    dabmux_note = None
     errors = [i for i in checker.check(p, manager_port=cfg().get('port')) if i['severity'] == 'error']
     if errors and not body.get('force'):
         return jsonify(ok=False, blocked=True, errors=errors,
@@ -660,12 +661,17 @@ def apply():
         from ..validate import check_with_dabmux
         dm = (capabilities.detect(cfg()).get('tools') or {}).get('odr-dabmux')
         v = check_with_dabmux(p.texts()['mux'], dm)
+        if v.get('skipped'):
+            dabmux_note = v['message']
         if not v['ok'] and not body.get('force_dabmux'):
             audit('apply.rejected_by_dabmux', v['message'])
             return jsonify(ok=False, blocked=True, dabmux=True, message=f'odr-dabmux rejected the new config: {v["message"]}',
                            errors=[{'severity': 'error', 'code': 'dabmux', 'message': v['message'], 'ref': {}}],
                            log=v.get('log', '')), 409
     res = ws().apply(current_user()['username'])
+    if dabmux_note:
+        res.setdefault('log', []).insert(0, 'note: ' + dabmux_note)
+        res['warning'] = dabmux_note
     db.x('INSERT INTO applies(ts, username, backup, status, message, log) VALUES (?,?,?,?,?,?)',
          (time.time(), current_user()['username'], res.get('backup', ''), 'ok' if res['ok'] else 'error',
           res.get('message', ''), __import__('json').dumps(res.get('log', []))))

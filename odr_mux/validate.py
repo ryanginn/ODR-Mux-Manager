@@ -114,6 +114,14 @@ def check_with_dabmux(text: str, dabmux: Optional[str], timeout: int = 20) -> di
     if fatal:
         caught = next((l for l in lines if 'Caught' in l or ('ERROR' in l and 'exceeds' in l)), fatal)
         return {'ok': False, 'skipped': False, 'message': _clean(caught), 'log': log[-4000:]}
+    if not started and proc.returncode is not None and proc.returncode < 0 and proc.returncode != -9:
+        # killed by a signal (e.g. a libzmq assertion -> SIGABRT) before reaching the config check:
+        # that's the environment, not the config, so don't block Apply on it
+        last = next((l for l in reversed(lines) if l.strip() and 'Copyright' not in l), '')
+        return {'ok': True, 'skipped': True, 'log': log[-4000:],
+                'message': f'odr-dabmux could not be test-run here (it crashed with signal {-proc.returncode} before '
+                           f'checking the config: {last.strip()[:160]}), so this config was only checked by the '
+                           f'manager. Re-run the installer to update the service unit, or switch the test-run off in Settings.'}
     if not started and proc.returncode not in (0, None, -9):
         errs = [l for l in lines if 'ERROR' in l and 'real-time priority' not in l]
         return {'ok': False, 'skipped': False,

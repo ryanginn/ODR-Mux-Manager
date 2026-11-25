@@ -378,3 +378,22 @@ def test_dabmux_precheck_catches_bad_configs(tmp_path):
     assert check_with_dabmux(good, _DABMUX)['ok']
     bad = check_with_dabmux(good.replace('        id 1\n', '        id auto\n', 1), _DABMUX)
     assert not bad['ok'] and 'hexparse' in bad['message']
+
+
+def test_auto_subchannel_id_is_taken_into_account():
+    # odr-dabmux gives a subchannel without `id` the lowest free id from 1 up (never 0): with
+    # stations on 1..19 the SPI subchannel (no id line in the mpbnl mux) gets 26 here, and a
+    # Journaline service must not reuse it
+    p = Project.load(MPBNL)
+    eff = p.effective_subch_ids()
+    assert eff['sub-spi'] == 17                      # ids 1..16, 18..25 are taken -> 17 is the first free
+    r = dataservices.add_data_service(p, {'preset': 'journaline', 'label': 'News', 'sid': '0xE322234A',
+                                          'inputuri': '/x/j.dat'})
+    new = p.station(r['station'])['subchannel_uid']
+    assert p.effective_subch_ids()[new] not in (17,) and not [i for i in checker.check(p) if i['code'] == 'subch-id-dup']
+    # reproduce the user's broken draft and fix it
+    p.subchannel(new).set('id', '17')
+    assert [i for i in checker.check(p) if i['code'] == 'subch-id-dup']
+    checker.apply_fix(p, 'fix-subch-ids')
+    assert not [i for i in checker.check(p) if i['code'] == 'subch-id-dup']
+    assert p.subchannel('sub-spi').get('id') == '17'
